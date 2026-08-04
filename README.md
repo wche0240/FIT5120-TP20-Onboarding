@@ -13,6 +13,7 @@ SensoryWay helps sensory-sensitive commuters compare Melbourne CBD walking route
 - Database: PostgreSQL
 - Data processing: Python and pandas
 - Route provider: OpenRouteService, called only by the backend
+- Map display: Google Maps JavaScript API, called only by the browser
 
 ## Repository Structure
 
@@ -58,10 +59,10 @@ The ETL also imports official Victorian public-transport stops within the Melbou
 
 ## Frontend
 
-The Next.js interface follows the project's Figma map-navigation concept: a responsive full-screen Melbourne map, a route search bar, crowd-threshold controls, and a desktop panel or mobile bottom sheet for route outcomes.
+The Next.js interface follows the project's Figma map-navigation concept: a responsive full-screen Google map of Melbourne, a route search bar, crowd-threshold controls, and a desktop panel or mobile bottom sheet for route outcomes.
 
 1. Keep the FastAPI service running on `http://localhost:8000`.
 2. In a separate terminal, run `cd frontend`, then `npm.cmd install` and `npm.cmd run dev`.
 3. Open `http://localhost:3000`.
 
-The frontend calls the local API through `NEXT_PUBLIC_API_BASE_URL`, which defaults to `http://localhost:8000`. Copy `frontend/.env.example` only when a different API address is needed.
+The frontend calls the local API through `NEXT_PUBLIC_API_BASE_URL`, which defaults to `http://localhost:8000`. It also needs `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` in `frontend/.env.local` to show the Google map. Copy `frontend/.env.example` as a starting point and do not commit the key. See `docs/google-maps-setup.md` for the required Google Cloud configuration.
