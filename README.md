@@ -36,8 +36,9 @@ The first build stores City of Melbourne sensor locations and minute-level pedes
 1. Start Docker Desktop.
 2. In PowerShell, copy `.env.example` to `.env` and choose a local PostgreSQL password.
 3. Start the database and API with `docker-compose up -d db api`.
-4. Run the data ingestion with `docker-compose run --rm etl`.
-5. Run the data tests with `docker-compose run --rm etl pytest`.
+4. Apply database migrations with `docker-compose run --rm migrate`.
+5. Run the data ingestion with `docker-compose run --rm etl`.
+6. Run the data tests with `docker-compose run --rm etl pytest`.
 
 The API documentation is available at `http://localhost:8000/docs` after the API container starts.
 
@@ -46,6 +47,10 @@ Set `ORS_API_KEY` in the local `.env` before using `POST /api/v1/routes`. Do not
 Pedestrian data older than 30 minutes is intentionally treated as outdated. SensoryWay still shows physical route options but withholds crowd recommendations; see `docs/epic-1-data-freshness-decision.md` for the recorded decision and evidence.
 
 The initial Low/Medium/High thresholds are configuration values only. They must be replaced with a documented profiling decision before the Epic 1 release.
+
+## Public Transport Access Points
+
+The ETL also imports official Victorian public-transport stops within the Melbourne CBD, while the frontend shows the nearby stop at each end of a planned walk. Run `docker-compose run --rm migrate` before the ETL to create the `transit_access_point` table. See `docs/epic-1-public-transport-integration.md` for the data source, boundary and acceptance evidence.
 
 ## Frontend
 

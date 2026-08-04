@@ -15,11 +15,12 @@ import {
   Route,
   Search,
   ShieldCheck,
+  TrainFront,
   UsersRound,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import type { MapPoint, MapRoute } from "@/components/SensoryWayMap";
+import type { MapPoint, MapRoute, TransitAccessPoint } from "@/components/SensoryWayMap";
 
 const SensoryWayMap = dynamic(() => import("@/components/SensoryWayMap"), {
   ssr: false,
@@ -92,12 +93,48 @@ export default function HomePage() {
   const [crowdLevel, setCrowdLevel] = useState<CrowdLevel>("medium");
   const [result, setResult] = useState<RoutesResponse | null>(null);
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null);
+  const [transitAccessPoints, setTransitAccessPoints] = useState<TransitAccessPoint[]>([]);
+  const [nearbyTransit, setNearbyTransit] = useState<{ start: TransitAccessPoint[]; destination: TransitAccessPoint[] }>({ start: [], destination: [] });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const start = findPlace(startLabel) ?? PLACES[0];
   const destination = findPlace(destinationLabel) ?? PLACES[4];
   const activeRoute = useMemo(() => result?.routes.find((route) => route.route_id === activeRouteId) ?? null, [activeRouteId, result]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    async function loadTransitAccessPoints() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/transit-access-points?limit=800`);
+        const body = (await response.json()) as TransitAccessPoint[];
+        if (response.ok && isCurrent) setTransitAccessPoints(body);
+      } catch {
+        // Route planning remains usable when the optional map layer cannot load.
+      }
+    }
+
+    void loadTransitAccessPoints();
+    return () => { isCurrent = false; };
+  }, []);
+
+  async function loadNearbyTransit(selectedStart: Place, selectedDestination: Place) {
+    const accessPointRequest = async (place: Place) => {
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/transit-access-points?longitude=${place.longitude}&latitude=${place.latitude}&radius_metres=500&limit=2`
+      );
+      if (!response.ok) return [];
+      return (await response.json()) as TransitAccessPoint[];
+    };
+
+    try {
+      const [startPoints, destinationPoints] = await Promise.all([accessPointRequest(selectedStart), accessPointRequest(selectedDestination)]);
+      setNearbyTransit({ start: startPoints, destination: destinationPoints });
+    } catch {
+      setNearbyTransit({ start: [], destination: [] });
+    }
+  }
 
   async function planRoute(event?: FormEvent) {
     event?.preventDefault();
@@ -126,6 +163,7 @@ export default function HomePage() {
       }
       setResult(body);
       setActiveRouteId(body.recommended_route_id ?? body.routes[0]?.route_id ?? null);
+      void loadNearbyTransit(selectedStart, selectedDestination);
     } catch (requestError) {
       setResult(null);
       setActiveRouteId(null);
@@ -147,7 +185,7 @@ export default function HomePage() {
       </nav>
 
       <section className="map-stage" aria-label="Route planner">
-        <SensoryWayMap start={start} destination={destination} routes={result?.routes ?? []} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} />
+        <SensoryWayMap start={start} destination={destination} routes={result?.routes ?? []} transitAccessPoints={transitAccessPoints} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} />
 
         <header className="planner-header">
           <div className="brand-mark" aria-hidden="true"><Navigation size={19} fill="currentColor" /></div>
@@ -224,6 +262,13 @@ export default function HomePage() {
                 ))}
               </div>
               {activeRoute?.crowd_score !== null && activeRoute?.crowd_score !== undefined ? <p className="route-detail">Peak nearby reading: {activeRoute.crowd_score} pedestrians per minute across {activeRoute.matched_sensor_count} nearby sensors.</p> : <p className="route-detail">Crowd levels are hidden until the latest official pedestrian data is within the 30-minute freshness window.</p>}
+              {(nearbyTransit.start.length > 0 || nearbyTransit.destination.length > 0) ? (
+                <div className="transit-summary">
+                  <div><TrainFront size={17} /><strong>Public transport access</strong></div>
+                  {nearbyTransit.start[0] ? <p>Near start: {nearbyTransit.start[0].name} ({nearbyTransit.start[0].mode}).</p> : null}
+                  {nearbyTransit.destination[0] ? <p>Near destination: {nearbyTransit.destination[0].name} ({nearbyTransit.destination[0].mode}).</p> : null}
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="empty-state"><Navigation size={22} /><div><h2>Plan a sensory-aware walk</h2><p>Choose two Melbourne CBD places, then compare route options by crowd level.</p></div></div>

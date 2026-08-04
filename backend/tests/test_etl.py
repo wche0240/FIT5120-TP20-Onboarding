@@ -1,4 +1,4 @@
-from app.etl import clean_minute_counts, clean_sensor_locations
+from app.etl import clean_minute_counts, clean_sensor_locations, clean_transit_access_points
 
 
 def test_clean_sensor_locations_removes_duplicate_sensor_ids() -> None:
@@ -51,3 +51,25 @@ def test_clean_minute_counts_keeps_only_the_latest_hour() -> None:
         lookback_minutes=60,
     )
     assert [row[4] for row in rows] == [2, 3]
+
+
+def test_clean_transit_access_points_keeps_supported_cbd_stops() -> None:
+    rows = clean_transit_access_points(
+        {
+            "features": [
+                {
+                    "geometry": {"type": "Point", "coordinates": [144.9631, -37.8136]},
+                    "properties": {"STOP_ID": "100", "STOP_NAME": "CBD Tram Stop", "MODE": "METRO TRAM"},
+                },
+                {
+                    "geometry": {"type": "Point", "coordinates": [145.12, -37.7]},
+                    "properties": {"STOP_ID": "101", "STOP_NAME": "Outside MVP area", "MODE": "METRO BUS"},
+                },
+                {
+                    "geometry": {"type": "Point", "coordinates": [144.97, -37.815]},
+                    "properties": {"STOP_ID": "102", "STOP_NAME": "Unsupported", "MODE": "FERRY"},
+                },
+            ]
+        }
+    )
+    assert rows == [("tram:100", "CBD Tram Stop", "tram", "METRO TRAM", -37.8136, 144.9631)]

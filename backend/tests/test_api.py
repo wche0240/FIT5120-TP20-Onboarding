@@ -71,6 +71,39 @@ def test_sensors_returns_map_ready_rows() -> None:
     assert response.json()[0]["crowd_level"] == "low"
 
 
+def test_transit_access_points_can_be_ranked_by_distance() -> None:
+    rows = [
+        {
+            "access_point_id": "tram:10",
+            "name": "Nearby tram stop",
+            "mode": "tram",
+            "source_mode": "METRO TRAM",
+            "latitude": -37.8136,
+            "longitude": 144.9631,
+        },
+        {
+            "access_point_id": "train:20",
+            "name": "Further train station",
+            "mode": "train",
+            "source_mode": "METRO TRAIN",
+            "latitude": -37.8183,
+            "longitude": 144.9667,
+        },
+    ]
+    response = client_for(mock_connection(rows=rows)).get(
+        "/api/v1/transit-access-points?longitude=144.9631&latitude=-37.8136&radius_metres=1000"
+    )
+    assert response.status_code == 200
+    assert response.json()[0]["access_point_id"] == "tram:10"
+    assert response.json()[0]["distance_metres"] == 0.0
+
+
+def test_transit_access_points_require_both_coordinates_for_a_nearby_search() -> None:
+    response = client_for(mock_connection()).get("/api/v1/transit-access-points?longitude=144.9631")
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Longitude and latitude must be supplied together."
+
+
 def test_route_score_returns_a_crowd_level_for_fresh_sensor_data() -> None:
     now = datetime.now(timezone.utc)
     rows = [

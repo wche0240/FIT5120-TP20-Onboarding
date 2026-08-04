@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
 import psycopg
@@ -20,6 +21,7 @@ from app.schemas import (
     RoutesRequest,
     RoutesResponse,
     SensorResponse,
+    TransitAccessPointResponse,
 )
 
 app = FastAPI(
@@ -151,6 +153,19 @@ def destination_is_in_melbourne_cbd(longitude: float, latitude: float) -> bool:
     return 144.94 <= longitude <= 144.99 and -37.825 <= latitude <= -37.80
 
 
+def distance_in_metres(
+    latitude_one: float,
+    longitude_one: float,
+    latitude_two: float,
+    longitude_two: float,
+) -> float:
+    """Return the great-circle distance between two WGS84 coordinates."""
+    latitude_delta = radians(latitude_two - latitude_one)
+    longitude_delta = radians(longitude_two - longitude_one)
+    haversine = sin(latitude_delta / 2) ** 2 + cos(radians(latitude_one)) * cos(radians(latitude_two)) * sin(longitude_delta / 2) ** 2
+    return 6_371_000 * 2 * asin(sqrt(haversine))
+
+
 @app.get("/api/v1/health", response_model=HealthResponse)
 def health(connection: psycopg.Connection[Any] = Depends(get_db)) -> HealthResponse:
     with connection.cursor() as cursor:
@@ -219,6 +234,52 @@ def sensors(
     with connection.cursor() as cursor:
         cursor.execute(query, (limit,))
         return [SensorResponse.model_validate(row) for row in cursor.fetchall()]
+
+
+@app.get("/api/v1/transit-access-points", response_model=list[TransitAccessPointResponse])
+def transit_access_points(
+    limit: int = Query(default=500, ge=1, le=800),
+    longitude: float | None = Query(default=None, ge=-180, le=180),
+    latitude: float | None = Query(default=None, ge=-90, le=90),
+    radius_metres: int = Query(default=500, ge=50, le=2_000),
+    connection: psycopg.Connection[Any] = Depends(get_db),
+) -> list[TransitAccessPointResponse]:
+    if (longitude is None) != (latitude is None):
+        raise HTTPException(status_code=422, detail="Longitude and latitude must be supplied together.")
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT access_point_id, name, mode, source_mode, latitude, longitude
+            FROM transit_access_point
+            ORDER BY mode, name, access_point_id
+            """
+        )
+        rows = cursor.fetchall()
+
+    access_points: list[TransitAccessPointResponse] = []
+    for row in rows:
+        distance_metres = None
+        if longitude is not None and latitude is not None:
+            distance_metres = distance_in_metres(latitude, longitude, float(row["latitude"]), float(row["longitude"]))
+            if distance_metres > radius_metres:
+                continue
+
+        access_points.append(
+            TransitAccessPointResponse(
+                access_point_id=row["access_point_id"],
+                name=row["name"],
+                mode=row["mode"],
+                source_mode=row["source_mode"],
+                latitude=float(row["latitude"]),
+                longitude=float(row["longitude"]),
+                distance_metres=round(distance_metres, 1) if distance_metres is not None else None,
+            )
+        )
+
+    if longitude is not None and latitude is not None:
+        access_points.sort(key=lambda access_point: access_point.distance_metres or 0)
+    return access_points[:limit]
 
 
 @app.post("/api/v1/route-score", response_model=RouteScoreResponse)

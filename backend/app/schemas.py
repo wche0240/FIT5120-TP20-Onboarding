@@ -49,6 +49,17 @@ class RouteScoreResponse(BaseModel):
 
 
 CrowdLevel = Literal["low", "medium", "high"]
+TransitMode = Literal["bus", "tram", "train", "coach"]
+
+
+class TransitAccessPointResponse(BaseModel):
+    access_point_id: str
+    name: str
+    mode: TransitMode
+    source_mode: str
+    latitude: float
+    longitude: float
+    distance_metres: float | None
 
 
 class RoutesRequest(BaseModel):

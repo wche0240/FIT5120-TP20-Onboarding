@@ -38,6 +38,21 @@ services:
     profiles: ["tools"]
     command: ["python", "-m", "scripts.ingest_open_data"]
 
+  migrate:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB?Set POSTGRES_DB in .env}
+      MIGRATIONS_DIR: /migrations
+    volumes:
+      - ./backend:/app
+      - ./database/migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["tools"]
+    command: ["python", "-m", "scripts.migrate"]
+
   api:
     build:
       context: ./backend

@@ -14,7 +14,13 @@ from app.crowd import classify_crowd_level
 
 MINUTE_COUNTS_DATASET = "pedestrian-counting-system-past-hour-counts-per-minute"
 SENSOR_LOCATIONS_DATASET = "pedestrian-counting-system-sensor-locations"
+TRANSIT_STOPS_DATASET = "victorian-public-transport-stops"
 CATALOGUE_URL = "https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/{dataset}/records"
+TRANSIT_STOPS_URL = (
+    "https://opendata.transport.vic.gov.au/dataset/6d36dfd9-8693-4552-8a03-05eb29a391fd/"
+    "resource/a2cba0b0-bddc-4b87-b495-2b6b7013af6e/download/public_transport_stops.geojson"
+)
+CBD_BOUNDS = {"minimum_longitude": 144.94, "maximum_longitude": 144.99, "minimum_latitude": -37.825, "maximum_latitude": -37.80}
 
 
 def fetch_records(
@@ -43,7 +49,7 @@ def fetch_records(
     return records
 
 
-def archive_raw_records(dataset: str, records: list[dict[str, Any]], data_dir: Path) -> None:
+def archive_raw_records(dataset: str, records: Any, data_dir: Path) -> None:
     raw_dir = data_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -144,6 +150,54 @@ def clean_minute_counts(
     return rows
 
 
+def transit_mode(source_mode: object) -> str | None:
+    normalised = str(source_mode or "").upper()
+    if "TRAM" in normalised:
+        return "tram"
+    if "TRAIN" in normalised:
+        return "train"
+    if "BUS" in normalised:
+        return "bus"
+    if "COACH" in normalised:
+        return "coach"
+    return None
+
+
+def clean_transit_access_points(payload: dict[str, Any]) -> list[tuple[Any, ...]]:
+    """Keep map-ready public-transport stops within the onboarding MVP CBD boundary."""
+    clean_rows: dict[str, tuple[Any, ...]] = {}
+    for feature in payload.get("features", []):
+        properties = feature.get("properties") or {}
+        geometry = feature.get("geometry") or {}
+        coordinates = geometry.get("coordinates") or []
+        if len(coordinates) < 2:
+            continue
+
+        try:
+            longitude = float(coordinates[0])
+            latitude = float(coordinates[1])
+        except (TypeError, ValueError):
+            continue
+
+        if not (
+            CBD_BOUNDS["minimum_longitude"] <= longitude <= CBD_BOUNDS["maximum_longitude"]
+            and CBD_BOUNDS["minimum_latitude"] <= latitude <= CBD_BOUNDS["maximum_latitude"]
+        ):
+            continue
+
+        source_mode = str(properties.get("MODE") or "").strip()
+        mode = transit_mode(source_mode)
+        stop_id = str(properties.get("STOP_ID") or "").strip()
+        name = str(properties.get("STOP_NAME") or "").strip()
+        if not mode or not stop_id or not name:
+            continue
+
+        access_point_id = f"{mode}:{stop_id}"
+        clean_rows[access_point_id] = (access_point_id, name, mode, source_mode, latitude, longitude)
+
+    return list(clean_rows.values())
+
+
 def start_refresh(conn: psycopg.Connection[Any], dataset: str, source_url: str) -> int:
     with conn.cursor() as cursor:
         cursor.execute(
@@ -209,6 +263,27 @@ def upsert_minute_counts(conn: psycopg.Connection[Any], rows: list[tuple[Any, ..
         )
 
 
+def upsert_transit_access_points(conn: psycopg.Connection[Any], rows: list[tuple[Any, ...]]) -> None:
+    with conn.cursor() as cursor:
+        cursor.executemany(
+            """
+            INSERT INTO transit_access_point
+                (access_point_id, name, mode, source_mode, latitude, longitude, source_dataset)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (access_point_id) DO UPDATE SET
+                name = EXCLUDED.name,
+                mode = EXCLUDED.mode,
+                source_mode = EXCLUDED.source_mode,
+                latitude = EXCLUDED.latitude,
+                longitude = EXCLUDED.longitude,
+                source_dataset = EXCLUDED.source_dataset,
+                source_fetched_at = NOW(),
+                updated_at = NOW()
+            """,
+            [(*row, TRANSIT_STOPS_DATASET) for row in rows],
+        )
+
+
 def ingest() -> None:
     database_url = os.environ["DATABASE_URL"]
     data_dir = Path(os.getenv("DATA_DIR", "/data"))
@@ -225,12 +300,15 @@ def ingest() -> None:
     with psycopg.connect(database_url) as conn:
         sensor_refresh = start_refresh(conn, SENSOR_LOCATIONS_DATASET, sensor_url)
         minute_refresh = start_refresh(conn, MINUTE_COUNTS_DATASET, minute_url)
+        transit_refresh = start_refresh(conn, TRANSIT_STOPS_DATASET, TRANSIT_STOPS_URL)
+        completed_refreshes: set[int] = set()
         try:
             sensor_records = fetch_records(SENSOR_LOCATIONS_DATASET, page_size, max_records)
             archive_raw_records(SENSOR_LOCATIONS_DATASET, sensor_records, data_dir)
             sensor_rows = clean_sensor_locations(sensor_records)
             upsert_sensor_locations(conn, sensor_rows)
             finish_refresh(conn, sensor_refresh, "succeeded", len(sensor_records), len(sensor_rows))
+            completed_refreshes.add(sensor_refresh)
 
             minute_records = fetch_records(
                 MINUTE_COUNTS_DATASET,
@@ -248,10 +326,21 @@ def ingest() -> None:
             )
             upsert_minute_counts(conn, minute_rows)
             finish_refresh(conn, minute_refresh, "succeeded", len(minute_records), len(minute_rows))
+            completed_refreshes.add(minute_refresh)
+
+            transit_response = requests.get(TRANSIT_STOPS_URL, timeout=60)
+            transit_response.raise_for_status()
+            transit_payload = transit_response.json()
+            archive_raw_records(TRANSIT_STOPS_DATASET, transit_payload, data_dir)
+            transit_rows = clean_transit_access_points(transit_payload)
+            upsert_transit_access_points(conn, transit_rows)
+            finish_refresh(conn, transit_refresh, "succeeded", len(transit_payload.get("features", [])), len(transit_rows))
+            completed_refreshes.add(transit_refresh)
             conn.commit()
         except Exception as error:
-            finish_refresh(conn, sensor_refresh, "failed", 0, 0, str(error))
-            finish_refresh(conn, minute_refresh, "failed", 0, 0, str(error))
+            for refresh_id in (sensor_refresh, minute_refresh, transit_refresh):
+                if refresh_id not in completed_refreshes:
+                    finish_refresh(conn, refresh_id, "failed", 0, 0, str(error))
             conn.commit()
             raise
 

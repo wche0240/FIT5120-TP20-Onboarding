@@ -15,10 +15,19 @@ export type MapRoute = {
   recommended: boolean;
 };
 
+export type TransitAccessPoint = MapPoint & {
+  access_point_id: string;
+  name: string;
+  mode: "bus" | "tram" | "train" | "coach";
+  source_mode: string;
+  distance_metres: number | null;
+};
+
 type SensoryWayMapProps = {
   start: MapPoint;
   destination: MapPoint;
   routes: MapRoute[];
+  transitAccessPoints: TransitAccessPoint[];
   activeRouteId: number | null;
   onRouteSelect: (routeId: number) => void;
 };
@@ -30,6 +39,10 @@ function routeColour(route: MapRoute, activeRouteId: number | null) {
   if (route.crowd_level === "high") return "#dc3f3f";
   if (route.crowd_level === "medium") return "#df8a16";
   return "#2d6cdf";
+}
+
+function transitColour(mode: TransitAccessPoint["mode"]) {
+  return { bus: "#7e3af2", tram: "#d63384", train: "#1769e0", coach: "#7c5d20" }[mode];
 }
 
 function MapViewport({ routes, start, destination }: Pick<SensoryWayMapProps, "routes" | "start" | "destination">) {
@@ -45,7 +58,7 @@ function MapViewport({ routes, start, destination }: Pick<SensoryWayMapProps, "r
   return null;
 }
 
-export default function SensoryWayMap({ start, destination, routes, activeRouteId, onRouteSelect }: SensoryWayMapProps) {
+export default function SensoryWayMap({ start, destination, routes, transitAccessPoints, activeRouteId, onRouteSelect }: SensoryWayMapProps) {
   return (
     <MapContainer center={MELBOURNE_CBD} zoom={14} zoomControl={false} className="leaflet-map" aria-label="Melbourne CBD route map">
       <TileLayer
@@ -54,6 +67,16 @@ export default function SensoryWayMap({ start, destination, routes, activeRouteI
       />
       <ZoomControl position="bottomright" />
       <MapViewport routes={routes} start={start} destination={destination} />
+      {transitAccessPoints.map((accessPoint) => (
+        <CircleMarker
+          key={accessPoint.access_point_id}
+          center={[accessPoint.latitude, accessPoint.longitude]}
+          radius={4}
+          pathOptions={{ color: "#ffffff", weight: 1.5, fillColor: transitColour(accessPoint.mode), fillOpacity: 0.9 }}
+        >
+          <Tooltip direction="top" offset={[0, -5]} opacity={0.96}>{accessPoint.name} ({accessPoint.mode})</Tooltip>
+        </CircleMarker>
+      ))}
       {routes.map((route) => (
         <Polyline
           key={route.route_id}
