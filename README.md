@@ -46,3 +46,13 @@ Set `ORS_API_KEY` in the local `.env` before using `POST /api/v1/routes`. Do not
 Pedestrian data older than 30 minutes is intentionally treated as outdated. SensoryWay still shows physical route options but withholds crowd recommendations; see `docs/epic-1-data-freshness-decision.md` for the recorded decision and evidence.
 
 The initial Low/Medium/High thresholds are configuration values only. They must be replaced with a documented profiling decision before the Epic 1 release.
+
+## Frontend
+
+The Next.js interface follows the project's Figma map-navigation concept: a responsive full-screen Melbourne map, a route search bar, crowd-threshold controls, and a desktop panel or mobile bottom sheet for route outcomes.
+
+1. Keep the FastAPI service running on `http://localhost:8000`.
+2. In a separate terminal, run `cd frontend`, then `npm.cmd install` and `npm.cmd run dev`.
+3. Open `http://localhost:3000`.
+
+The frontend calls the local API through `NEXT_PUBLIC_API_BASE_URL`, which defaults to `http://localhost:8000`. Copy `frontend/.env.example` only when a different API address is needed.
