@@ -68,3 +68,29 @@ def test_sensors_returns_map_ready_rows() -> None:
     assert response.status_code == 200
     assert response.json()[0]["sensor_name"] == "Test sensor"
     assert response.json()[0]["crowd_level"] == "low"
+
+
+def test_route_score_returns_a_crowd_level_for_fresh_sensor_data() -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        {
+            "location_id": 1,
+            "latitude": -37.81,
+            "longitude": 144.9652,
+            "last_seen_at": now,
+            "total_count": 180,
+        }
+    ]
+    response = client_for(mock_connection(rows=rows)).post(
+        "/api/v1/route-score",
+        json={
+            "coordinates": [
+                {"longitude": 144.965, "latitude": -37.81},
+                {"longitude": 144.966, "latitude": -37.81},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "available"
+    assert response.json()["crowd_level"] == "high"
+    assert response.json()["matched_sensor_count"] == 1
