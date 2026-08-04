@@ -48,6 +48,10 @@ Pedestrian data older than 30 minutes is intentionally treated as outdated. Sens
 
 The initial Low/Medium/High thresholds are configuration values only. They must be replaced with a documented profiling decision before the Epic 1 release.
 
+## CBD Destination Search
+
+Users can enter a Melbourne CBD address, street or landmark as the route destination. The backend resolves the destination only after the user selects `Find routes`, then rejects results outside the onboarding MVP boundary. The default low-volume geocoder is configurable through `GEOCODER_SEARCH_URL`; see `docs/epic-1-destination-search.md` for privacy, rate-limit and acceptance-test guidance.
+
 ## Public Transport Access Points
 
 The ETL also imports official Victorian public-transport stops within the Melbourne CBD, while the frontend shows the nearby stop at each end of a planned walk. Run `docker-compose run --rm migrate` before the ETL to create the `transit_access_point` table. See `docs/epic-1-public-transport-integration.md` for the data source, boundary and acceptance evidence.

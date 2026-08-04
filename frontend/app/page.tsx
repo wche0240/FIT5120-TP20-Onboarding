@@ -52,6 +52,13 @@ type RoutesResponse = {
   warning: string | null;
 };
 
+type LocationSearchResult = {
+  name: string;
+  display_name: string;
+  longitude: number;
+  latitude: number;
+};
+
 const PLACES: Place[] = [
   { label: "Melbourne Central", detail: "La Trobe Street, Melbourne", latitude: -37.81, longitude: 144.9631 },
   { label: "Flinders Street Station", detail: "Flinders Street, Melbourne", latitude: -37.8183, longitude: 144.9667 },
@@ -90,6 +97,7 @@ function routeLabel(route: ApiRoute) {
 export default function HomePage() {
   const [startLabel, setStartLabel] = useState("Melbourne Central");
   const [destinationLabel, setDestinationLabel] = useState("Collins Street destination");
+  const [resolvedDestination, setResolvedDestination] = useState<Place | null>(PLACES[4]);
   const [crowdLevel, setCrowdLevel] = useState<CrowdLevel>("medium");
   const [result, setResult] = useState<RoutesResponse | null>(null);
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null);
@@ -99,7 +107,7 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const start = findPlace(startLabel) ?? PLACES[0];
-  const destination = findPlace(destinationLabel) ?? PLACES[4];
+  const destination = findPlace(destinationLabel) ?? resolvedDestination ?? PLACES[4];
   const activeRoute = useMemo(() => result?.routes.find((route) => route.route_id === activeRouteId) ?? null, [activeRouteId, result]);
 
   useEffect(() => {
@@ -136,18 +144,40 @@ export default function HomePage() {
     }
   }
 
+  async function resolveDestination() {
+    const suggestedPlace = findPlace(destinationLabel);
+    if (suggestedPlace) return suggestedPlace;
+
+    const response = await fetch(`${API_BASE_URL}/api/v1/location-search?query=${encodeURIComponent(destinationLabel.trim())}`);
+    const body = (await response.json()) as LocationSearchResult[] | { detail?: string };
+    if (!response.ok || !Array.isArray(body)) {
+      throw new Error("detail" in body ? body.detail ?? "Could not search for that destination." : "Could not search for that destination.");
+    }
+    const selectedLocation = body[0];
+    if (!selectedLocation) {
+      throw new Error("No matching destination was found inside the Melbourne CBD.");
+    }
+    return {
+      label: selectedLocation.name,
+      detail: selectedLocation.display_name,
+      longitude: selectedLocation.longitude,
+      latitude: selectedLocation.latitude,
+    };
+  }
+
   async function planRoute(event?: FormEvent) {
     event?.preventDefault();
     const selectedStart = findPlace(startLabel);
-    const selectedDestination = findPlace(destinationLabel);
-    if (!selectedStart || !selectedDestination) {
-      setError("Choose a start and destination from the Melbourne CBD suggestions.");
+    if (!selectedStart) {
+      setError("Choose a start from the Melbourne CBD suggestions.");
       return;
     }
 
     setIsLoading(true);
     setError(null);
     try {
+      const selectedDestination = await resolveDestination();
+      setResolvedDestination(selectedDestination);
       const response = await fetch(`${API_BASE_URL}/api/v1/routes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -203,7 +233,7 @@ export default function HomePage() {
           <div className="place-field">
             <Search size={18} aria-hidden="true" />
             <label htmlFor="destination-place">Destination</label>
-            <input id="destination-place" list="cbd-places" value={destinationLabel} onChange={(event) => setDestinationLabel(event.target.value)} placeholder="Choose a destination" />
+            <input id="destination-place" list="cbd-places" value={destinationLabel} onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); }} placeholder="Enter a CBD address or landmark" />
           </div>
           <datalist id="cbd-places">{PLACES.map((place) => <option key={place.label} value={place.label}>{place.detail}</option>)}</datalist>
           <button className="plan-button" type="submit" disabled={isLoading} aria-label={isLoading ? "Finding routes" : "Find routes"}>
@@ -261,6 +291,7 @@ export default function HomePage() {
                   </button>
                 ))}
               </div>
+              <p className="route-detail">Destination: {destination.label}.</p>
               {activeRoute?.crowd_score !== null && activeRoute?.crowd_score !== undefined ? <p className="route-detail">Peak nearby reading: {activeRoute.crowd_score} pedestrians per minute across {activeRoute.matched_sensor_count} nearby sensors.</p> : <p className="route-detail">Crowd levels are hidden until the latest official pedestrian data is within the 30-minute freshness window.</p>}
               {(nearbyTransit.start.length > 0 || nearbyTransit.destination.length > 0) ? (
                 <div className="transit-summary">
@@ -271,7 +302,7 @@ export default function HomePage() {
               ) : null}
             </>
           ) : (
-            <div className="empty-state"><Navigation size={22} /><div><h2>Plan a sensory-aware walk</h2><p>Choose two Melbourne CBD places, then compare route options by crowd level.</p></div></div>
+            <div className="empty-state"><Navigation size={22} /><div><h2>Plan a sensory-aware walk</h2><p>Choose a start suggestion and enter any Melbourne CBD address or landmark as the destination.</p></div></div>
           )}
         </section>
 

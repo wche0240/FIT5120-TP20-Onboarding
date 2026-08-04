@@ -10,11 +10,13 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
+from app.geocoding import GeocodingError, is_in_melbourne_cbd, search_cbd_locations
 from app.route_scoring import SensorReading, score_route
 from app.routing import OpenRouteServiceError, request_walking_routes
 from app.schemas import (
     DataStatusResponse,
     HealthResponse,
+    LocationSearchResult,
     RouteOption,
     RouteScoreRequest,
     RouteScoreResponse,
@@ -149,10 +151,6 @@ def route_limit(level: str) -> int:
     return {"low": 0, "medium": 1, "high": 2}[level]
 
 
-def destination_is_in_melbourne_cbd(longitude: float, latitude: float) -> bool:
-    return 144.94 <= longitude <= 144.99 and -37.825 <= latitude <= -37.80
-
-
 def distance_in_metres(
     latitude_one: float,
     longitude_one: float,
@@ -236,6 +234,17 @@ def sensors(
         return [SensorResponse.model_validate(row) for row in cursor.fetchall()]
 
 
+@app.get("/api/v1/location-search", response_model=list[LocationSearchResult])
+def location_search(query: str = Query(min_length=3, max_length=120)) -> list[LocationSearchResult]:
+    normalised_query = query.strip()
+    if len(normalised_query) < 3:
+        raise HTTPException(status_code=422, detail="Enter at least three non-space characters to search for a destination.")
+    try:
+        return [LocationSearchResult.model_validate(location) for location in search_cbd_locations(normalised_query)]
+    except GeocodingError as error:
+        raise HTTPException(status_code=503, detail="Location search is temporarily unavailable.") from error
+
+
 @app.get("/api/v1/transit-access-points", response_model=list[TransitAccessPointResponse])
 def transit_access_points(
     limit: int = Query(default=500, ge=1, le=800),
@@ -296,7 +305,7 @@ def routes(
     request: RoutesRequest,
     connection: psycopg.Connection[Any] = Depends(get_db),
 ) -> RoutesResponse:
-    if not destination_is_in_melbourne_cbd(request.destination.longitude, request.destination.latitude):
+    if not is_in_melbourne_cbd(request.destination.longitude, request.destination.latitude):
         raise HTTPException(status_code=422, detail="The onboarding MVP currently supports destinations within Melbourne CBD.")
 
     api_key = os.getenv("ORS_API_KEY", "").strip()

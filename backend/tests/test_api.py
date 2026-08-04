@@ -71,6 +71,32 @@ def test_sensors_returns_map_ready_rows() -> None:
     assert response.json()[0]["crowd_level"] == "low"
 
 
+def test_location_search_returns_cbd_location_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.main.search_cbd_locations",
+        lambda query: (
+            {
+                "name": "State Library Victoria",
+                "display_name": "State Library Victoria, Swanston Street, Melbourne, Victoria, Australia",
+                "latitude": -37.8099,
+                "longitude": 144.9652,
+            },
+        ),
+    )
+
+    response = client_for(mock_connection()).get("/api/v1/location-search?query=State%20Library%20Victoria")
+
+    assert response.status_code == 200
+    assert response.json()[0]["name"] == "State Library Victoria"
+    assert response.json()[0]["longitude"] == 144.9652
+
+
+def test_location_search_rejects_an_empty_meaningful_query() -> None:
+    response = client_for(mock_connection()).get("/api/v1/location-search?query=%20%20%20")
+    assert response.status_code == 422
+    assert "non-space characters" in response.json()["detail"]
+
+
 def test_transit_access_points_can_be_ranked_by_distance() -> None:
     rows = [
         {
@@ -212,3 +238,15 @@ def test_routes_reports_a_configuration_error_without_an_ors_key(monkeypatch: py
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Routing is not configured on this server."
+
+
+def test_routes_rejects_destinations_outside_the_melbourne_cbd() -> None:
+    response = client_for(mock_connection()).post(
+        "/api/v1/routes",
+        json={
+            "start": {"longitude": 144.9650, "latitude": -37.8100},
+            "destination": {"longitude": 145.1, "latitude": -37.9},
+        },
+    )
+    assert response.status_code == 422
+    assert "Melbourne CBD" in response.json()["detail"]

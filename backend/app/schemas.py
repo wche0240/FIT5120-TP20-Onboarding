@@ -35,6 +35,13 @@ class GeoPoint(BaseModel):
     latitude: float = Field(ge=-90, le=90)
 
 
+class LocationSearchResult(BaseModel):
+    name: str
+    display_name: str
+    longitude: float
+    latitude: float
+
+
 class RouteScoreRequest(BaseModel):
     coordinates: list[GeoPoint] = Field(min_length=2, max_length=2_000)
 
