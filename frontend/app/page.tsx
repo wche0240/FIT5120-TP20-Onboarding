@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import {
   AlertTriangle,
   Bookmark,
+  BookmarkCheck,
+  BookmarkPlus,
   ChevronRight,
   CircleUserRound,
   Compass,
@@ -15,7 +17,9 @@ import {
   Search,
   ShieldCheck,
   TrainFront,
+  Trash2,
   UsersRound,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -57,6 +61,19 @@ type LocationSearchResult = {
   longitude: number;
   latitude: number;
 };
+
+type AppView = "explore" | "saved" | "profile";
+
+type SavedRoute = {
+  id: string;
+  startLabel: string;
+  destinationLabel: string;
+  crowdLevel: CrowdLevel;
+  distanceMetres: number;
+  durationSeconds: number;
+};
+
+const SAVED_ROUTES_STORAGE_KEY = "sensoryway-saved-routes";
 
 const PLACES: Place[] = [
   { label: "Melbourne Central", detail: "La Trobe Street, Melbourne", latitude: -37.81, longitude: 144.9631 },
@@ -104,6 +121,10 @@ export default function HomePage() {
   const [nearbyTransit, setNearbyTransit] = useState<{ start: TransitAccessPoint[]; destination: TransitAccessPoint[] }>({ start: [], destination: [] });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [activeView, setActiveView] = useState<AppView>("explore");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
+  const [savedRoutesLoaded, setSavedRoutesLoaded] = useState(false);
 
   const start = findPlace(startLabel) ?? PLACES[0];
   const destination = findPlace(destinationLabel) ?? resolvedDestination ?? PLACES[4];
@@ -125,6 +146,21 @@ export default function HomePage() {
     void loadTransitAccessPoints();
     return () => { isCurrent = false; };
   }, []);
+
+  useEffect(() => {
+    try {
+      const storedRoutes = window.localStorage.getItem(SAVED_ROUTES_STORAGE_KEY);
+      if (storedRoutes) setSavedRoutes(JSON.parse(storedRoutes) as SavedRoute[]);
+    } catch {
+      setSavedRoutes([]);
+    } finally {
+      setSavedRoutesLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (savedRoutesLoaded) window.localStorage.setItem(SAVED_ROUTES_STORAGE_KEY, JSON.stringify(savedRoutes));
+  }, [savedRoutes, savedRoutesLoaded]);
 
   async function loadNearbyTransit(selectedStart: Place, selectedDestination: Place) {
     const accessPointRequest = async (place: Place) => {
@@ -202,43 +238,76 @@ export default function HomePage() {
     }
   }
 
+  function selectView(view: AppView) {
+    setActiveView(view);
+    setIsDrawerOpen(false);
+  }
+
+  const activeSavedRouteId = activeRoute ? `${startLabel}:${destination.label}:${crowdLevel}:${activeRoute.route_id}` : null;
+  const activeRouteIsSaved = activeSavedRouteId ? savedRoutes.some((route) => route.id === activeSavedRouteId) : false;
+
+  function saveActiveRoute() {
+    if (!activeRoute || !activeSavedRouteId) return;
+    const routeToSave: SavedRoute = {
+      id: activeSavedRouteId,
+      startLabel,
+      destinationLabel: destination.label,
+      crowdLevel,
+      distanceMetres: activeRoute.distance_metres,
+      durationSeconds: activeRoute.duration_seconds,
+    };
+    setSavedRoutes((routes) => routes.some((route) => route.id === routeToSave.id) ? routes : [routeToSave, ...routes]);
+  }
+
+  function restoreSavedRoute(savedRoute: SavedRoute) {
+    setStartLabel(savedRoute.startLabel);
+    setDestinationLabel(savedRoute.destinationLabel);
+    setResolvedDestination(findPlace(savedRoute.destinationLabel) ?? null);
+    setCrowdLevel(savedRoute.crowdLevel);
+    selectView("explore");
+  }
+
   return (
     <main className="app-shell">
       <nav className="desktop-rail" aria-label="Primary navigation">
-        <button className="icon-button rail-menu" aria-label="Open navigation"><Menu size={21} /></button>
+        <button className="icon-button rail-menu" type="button" aria-label="Open navigation" title="Open navigation" onClick={() => setIsDrawerOpen(true)}><Menu size={21} /></button>
         <div className="rail-links">
-          <button className="rail-link is-active" aria-label="Explore routes"><Compass size={21} /><span>Explore</span></button>
-          <button className="rail-link" aria-label="Saved routes"><Bookmark size={20} /><span>Saved</span></button>
+          <button className={activeView === "explore" ? "rail-link is-active" : "rail-link"} type="button" aria-label="Explore routes" title="Explore routes" onClick={() => selectView("explore")}><Compass size={21} /><span>Explore</span></button>
+          <button className={activeView === "saved" ? "rail-link is-active" : "rail-link"} type="button" aria-label="Saved routes" title="Saved routes" onClick={() => selectView("saved")}><Bookmark size={20} /><span>Saved</span></button>
         </div>
-        <button className="icon-button" aria-label="Profile"><CircleUserRound size={23} /></button>
+        <button className={activeView === "profile" ? "icon-button is-active" : "icon-button"} type="button" aria-label="Route settings" title="Route settings" onClick={() => selectView("profile")}><CircleUserRound size={23} /></button>
       </nav>
 
       <section className="map-stage" aria-label="Route planner">
         <SensoryWayMap start={start} destination={destination} routes={result?.routes ?? []} transitAccessPoints={transitAccessPoints} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} />
 
-        <header className="planner-header">
+        <aside className="map-sidebar" aria-label="SensoryWay workspace">
+          {activeView === "explore" ? <>
+          <header className="planner-header">
           <div className="brand-mark" aria-hidden="true"><Navigation size={19} fill="currentColor" /></div>
           <div className="brand-copy"><strong>SensoryWay</strong><span>Melbourne CBD</span></div>
-        </header>
+          </header>
 
-        <form className="search-panel" onSubmit={planRoute}>
-          <div className="place-field">
-            <MapPinned size={18} aria-hidden="true" />
-            <label htmlFor="start-place">Start</label>
-            <input id="start-place" list="cbd-places" value={startLabel} onChange={(event) => setStartLabel(event.target.value)} placeholder="Choose a start point" />
-          </div>
-          <div className="field-divider" />
-          <div className="place-field">
-            <Search size={18} aria-hidden="true" />
-            <label htmlFor="destination-place">Destination</label>
-            <input id="destination-place" list="cbd-places" value={destinationLabel} onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); }} placeholder="Enter a CBD address or landmark" />
-          </div>
-          <datalist id="cbd-places">{PLACES.map((place) => <option key={place.label} value={place.label}>{place.detail}</option>)}</datalist>
-          <button className="plan-button" type="submit" disabled={isLoading} aria-label={isLoading ? "Finding routes" : "Find routes"}>
-            {isLoading ? <LoaderCircle className="spin" size={19} /> : <Route size={19} />}
-            <span>{isLoading ? "Finding routes" : "Find routes"}</span>
-          </button>
-        </form>
+          <form className="directions-form" onSubmit={planRoute}>
+            <h1>Plan a walk</h1>
+            <div className="direction-fields">
+              <div className="place-field">
+                <MapPinned size={18} aria-hidden="true" />
+                <label htmlFor="start-place">Start</label>
+                <input id="start-place" list="cbd-places" value={startLabel} onChange={(event) => setStartLabel(event.target.value)} placeholder="Choose a start point" />
+              </div>
+              <div className="place-field">
+                <Search size={18} aria-hidden="true" />
+                <label htmlFor="destination-place">Destination</label>
+                <input id="destination-place" list="cbd-places" value={destinationLabel} onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); }} placeholder="Enter a CBD address or landmark" />
+              </div>
+            </div>
+            <datalist id="cbd-places">{PLACES.map((place) => <option key={place.label} value={place.label}>{place.detail}</option>)}</datalist>
+            <button className="plan-button" type="submit" disabled={isLoading} aria-label={isLoading ? "Finding routes" : "Find routes"}>
+              {isLoading ? <LoaderCircle className="spin" size={19} /> : <Route size={19} />}
+              <span>{isLoading ? "Finding routes" : "Find routes"}</span>
+            </button>
+          </form>
 
         <section className="preference-panel" aria-labelledby="preference-heading">
           <div className="panel-heading">
@@ -275,7 +344,12 @@ export default function HomePage() {
                   <span className="eyebrow">Route options</span>
                   <h2>{result.recommended_route_id ? "Crowd preference applied" : "Walking routes"}</h2>
                 </div>
-                <span className={result.status === "available" ? "status-chip available" : "status-chip stale"}>{result.status === "available" ? "Current data" : "Crowd data delayed"}</span>
+                <div className="result-actions">
+                  <span className={result.status === "available" ? "status-chip available" : "status-chip stale"}>{result.status === "available" ? "Current data" : "Crowd data delayed"}</span>
+                  {activeRoute ? <button className={activeRouteIsSaved ? "save-route-button saved" : "save-route-button"} type="button" aria-label={activeRouteIsSaved ? "Route saved" : "Save current route"} title={activeRouteIsSaved ? "Route saved" : "Save current route"} onClick={saveActiveRoute}>
+                    {activeRouteIsSaved ? <BookmarkCheck size={18} /> : <BookmarkPlus size={18} />}
+                  </button> : null}
+                </div>
               </div>
               <div className="route-list">
                 {result.routes.map((route) => (
@@ -304,14 +378,19 @@ export default function HomePage() {
           )}
         </section>
 
-        <div className="map-tools"><button className="icon-button" aria-label="Centre map on route"><Navigation size={19} /></button></div>
+        </> : null}
+
+        {activeView === "saved" ? <section className="sidebar-view"><div className="view-heading"><Bookmark size={21} /><div><h1>Saved routes</h1><p>{savedRoutes.length ? `${savedRoutes.length} route${savedRoutes.length === 1 ? "" : "s"}` : "No saved routes"}</p></div></div>{savedRoutes.length ? <div className="saved-route-list">{savedRoutes.map((savedRoute) => <div className="saved-route" key={savedRoute.id}><button type="button" onClick={() => restoreSavedRoute(savedRoute)}><strong>{savedRoute.startLabel} to {savedRoute.destinationLabel}</strong><span>{formatDistance(savedRoute.distanceMetres)} 路 {formatDuration(savedRoute.durationSeconds)} · {savedRoute.crowdLevel} preference</span></button><button type="button" className="remove-saved-route" aria-label={`Remove saved route to ${savedRoute.destinationLabel}`} title="Remove saved route" onClick={() => setSavedRoutes((routes) => routes.filter((route) => route.id !== savedRoute.id))}><Trash2 size={17} /></button></div>)}</div> : <div className="empty-state"><Bookmark size={22} /><div><h2>Nothing saved yet</h2><p>Save an active route after planning your walk.</p></div></div>}</section> : null}
+        {activeView === "profile" ? <section className="sidebar-view"><div className="view-heading"><CircleUserRound size={22} /><div><h1>Route settings</h1><p>Stored only in this browser</p></div></div><div className="profile-preference"><h2>Preferred crowd level</h2><div className="level-selector" role="radiogroup" aria-label="Profile crowd preference">{CROWD_OPTIONS.map((option) => <button key={option.value} type="button" className={crowdLevel === option.value ? "level-option selected" : "level-option"} onClick={() => setCrowdLevel(option.value)} role="radio" aria-checked={crowdLevel === option.value}><strong>{option.label}</strong><span>{option.help}</span></button>)}</div></div></section> : null}
+        </aside>
       </section>
 
       <nav className="mobile-nav" aria-label="Mobile navigation">
-        <button className="mobile-link is-active"><Compass size={21} /><span>Explore</span></button>
-        <button className="mobile-link"><Bookmark size={21} /><span>Saved</span></button>
-        <button className="mobile-link"><CircleUserRound size={21} /><span>Profile</span></button>
+        <button className={activeView === "explore" ? "mobile-link is-active" : "mobile-link"} type="button" onClick={() => selectView("explore")}><Compass size={21} /><span>Explore</span></button>
+        <button className={activeView === "saved" ? "mobile-link is-active" : "mobile-link"} type="button" onClick={() => selectView("saved")}><Bookmark size={21} /><span>Saved</span></button>
+        <button className={activeView === "profile" ? "mobile-link is-active" : "mobile-link"} type="button" onClick={() => selectView("profile")}><CircleUserRound size={21} /><span>Profile</span></button>
       </nav>
+      {isDrawerOpen ? <><button className="drawer-backdrop" type="button" aria-label="Close navigation" onClick={() => setIsDrawerOpen(false)} /><aside className="navigation-drawer" role="dialog" aria-modal="true" aria-label="Navigation menu"><div className="drawer-header"><div className="brand-mark" aria-hidden="true"><Navigation size={19} fill="currentColor" /></div><strong>SensoryWay</strong><button className="icon-button" type="button" aria-label="Close navigation" title="Close navigation" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button></div><div className="drawer-links"><button type="button" className={activeView === "explore" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("explore")}><Compass size={20} />Explore</button><button type="button" className={activeView === "saved" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("saved")}><Bookmark size={20} />Saved routes</button><button type="button" className={activeView === "profile" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("profile")}><CircleUserRound size={20} />Route settings</button></div></aside></> : null}
     </main>
   );
 }
