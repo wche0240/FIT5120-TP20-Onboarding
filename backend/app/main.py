@@ -5,16 +5,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 import psycopg
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
 from app.route_scoring import SensorReading, score_route
+from app.routing import OpenRouteServiceError, request_walking_routes
 from app.schemas import (
     DataStatusResponse,
     HealthResponse,
+    RouteOption,
     RouteScoreRequest,
     RouteScoreResponse,
+    RoutesRequest,
+    RoutesResponse,
     SensorResponse,
 )
 
@@ -47,6 +51,104 @@ def crowd_thresholds() -> tuple[int, int]:
     if low_max < 0 or medium_max < low_max:
         raise RuntimeError("Crowd thresholds are invalid")
     return low_max, medium_max
+
+
+def load_sensor_rows(connection: psycopg.Connection[Any]) -> list[dict[str, Any]]:
+    query = """
+        SELECT
+            sensor.location_id,
+            sensor.latitude,
+            sensor.longitude,
+            latest.sensing_datetime AS last_seen_at,
+            latest.total_count
+        FROM sensor_location AS sensor
+        JOIN LATERAL (
+            SELECT sensing_datetime, total_count
+            FROM pedestrian_minute_count
+            WHERE location_id = sensor.location_id
+            ORDER BY sensing_datetime DESC
+            LIMIT 1
+        ) AS latest ON TRUE
+        WHERE sensor.status = 'A'
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(query)
+        return cursor.fetchall()
+
+
+def score_coordinates(
+    coordinates: list[tuple[float, float]],
+    connection: psycopg.Connection[Any],
+) -> RouteScoreResponse:
+    rows = load_sensor_rows(connection)
+    if not rows:
+        return RouteScoreResponse(
+            status="unavailable",
+            crowd_level=None,
+            crowd_score=None,
+            matched_sensor_count=0,
+            latest_data_at=None,
+            warning="No pedestrian sensor data is available.",
+        )
+
+    latest_data_at = max(row["last_seen_at"] for row in rows)
+    if latest_data_at.tzinfo is None:
+        latest_data_at = latest_data_at.replace(tzinfo=timezone.utc)
+    age_minutes = max(0, int((datetime.now(timezone.utc) - latest_data_at).total_seconds() // 60))
+    if age_minutes > stale_after_minutes():
+        return RouteScoreResponse(
+            status="stale",
+            crowd_level=None,
+            crowd_score=None,
+            matched_sensor_count=0,
+            latest_data_at=latest_data_at,
+            warning="Pedestrian data is outdated, so no route crowd score is shown.",
+        )
+
+    readings = [
+        SensorReading(
+            location_id=row["location_id"],
+            latitude=float(row["latitude"]),
+            longitude=float(row["longitude"]),
+            total_count=row["total_count"],
+        )
+        for row in rows
+    ]
+    low_max, medium_max = crowd_thresholds()
+    score = score_route(
+        coordinates,
+        readings,
+        sensor_radius_metres=int(os.getenv("ROUTE_SENSOR_RADIUS_METRES", "80")),
+        low_max=low_max,
+        medium_max=medium_max,
+    )
+
+    if score.matched_sensor_count == 0:
+        return RouteScoreResponse(
+            status="unavailable",
+            crowd_level=None,
+            crowd_score=None,
+            matched_sensor_count=0,
+            latest_data_at=latest_data_at,
+            warning="No pedestrian sensors cover this route.",
+        )
+
+    return RouteScoreResponse(
+        status="available",
+        crowd_level=score.crowd_level,
+        crowd_score=score.crowd_score,
+        matched_sensor_count=score.matched_sensor_count,
+        latest_data_at=latest_data_at,
+        warning=None,
+    )
+
+
+def route_limit(level: str) -> int:
+    return {"low": 0, "medium": 1, "high": 2}[level]
+
+
+def destination_is_in_melbourne_cbd(longitude: float, latitude: float) -> bool:
+    return 144.94 <= longitude <= 144.99 and -37.825 <= latitude <= -37.80
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)
@@ -124,85 +226,82 @@ def route_score(
     request: RouteScoreRequest,
     connection: psycopg.Connection[Any] = Depends(get_db),
 ) -> RouteScoreResponse:
-    query = """
-        SELECT
-            sensor.location_id,
-            sensor.latitude,
-            sensor.longitude,
-            latest.sensing_datetime AS last_seen_at,
-            latest.total_count
-        FROM sensor_location AS sensor
-        JOIN LATERAL (
-            SELECT sensing_datetime, total_count
-            FROM pedestrian_minute_count
-            WHERE location_id = sensor.location_id
-            ORDER BY sensing_datetime DESC
-            LIMIT 1
-        ) AS latest ON TRUE
-        WHERE sensor.status = 'A'
-    """
-    with connection.cursor() as cursor:
-        cursor.execute(query)
-        rows = cursor.fetchall()
-
-    if not rows:
-        return RouteScoreResponse(
-            status="unavailable",
-            crowd_level=None,
-            crowd_score=None,
-            matched_sensor_count=0,
-            latest_data_at=None,
-            warning="No pedestrian sensor data is available.",
-        )
-
-    latest_data_at = max(row["last_seen_at"] for row in rows)
-    if latest_data_at.tzinfo is None:
-        latest_data_at = latest_data_at.replace(tzinfo=timezone.utc)
-    age_minutes = max(0, int((datetime.now(timezone.utc) - latest_data_at).total_seconds() // 60))
-    if age_minutes > stale_after_minutes():
-        return RouteScoreResponse(
-            status="stale",
-            crowd_level=None,
-            crowd_score=None,
-            matched_sensor_count=0,
-            latest_data_at=latest_data_at,
-            warning="Pedestrian data is outdated, so no route crowd score is shown.",
-        )
-
-    readings = [
-        SensorReading(
-            location_id=row["location_id"],
-            latitude=float(row["latitude"]),
-            longitude=float(row["longitude"]),
-            total_count=row["total_count"],
-        )
-        for row in rows
-    ]
     coordinates = [(point.longitude, point.latitude) for point in request.coordinates]
-    low_max, medium_max = crowd_thresholds()
-    score = score_route(
-        coordinates,
-        readings,
-        sensor_radius_metres=int(os.getenv("ROUTE_SENSOR_RADIUS_METRES", "80")),
-        low_max=low_max,
-        medium_max=medium_max,
-    )
+    return score_coordinates(coordinates, connection)
 
-    if score.matched_sensor_count == 0:
-        return RouteScoreResponse(
-            status="unavailable",
-            crowd_level=None,
-            crowd_score=None,
-            matched_sensor_count=0,
-            latest_data_at=latest_data_at,
-            warning="No pedestrian sensors cover this route.",
+
+@app.post("/api/v1/routes", response_model=RoutesResponse)
+def routes(
+    request: RoutesRequest,
+    connection: psycopg.Connection[Any] = Depends(get_db),
+) -> RoutesResponse:
+    if not destination_is_in_melbourne_cbd(request.destination.longitude, request.destination.latitude):
+        raise HTTPException(status_code=422, detail="The onboarding MVP currently supports destinations within Melbourne CBD.")
+
+    api_key = os.getenv("ORS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Routing is not configured on this server.")
+
+    try:
+        provider_routes = request_walking_routes(
+            start=(request.start.longitude, request.start.latitude),
+            destination=(request.destination.longitude, request.destination.latitude),
+            api_key=api_key,
+            timeout_seconds=float(os.getenv("ORS_TIMEOUT_SECONDS", "10")),
+        )
+    except OpenRouteServiceError as error:
+        raise HTTPException(status_code=503, detail="The route service is temporarily unavailable.") from error
+
+    options: list[RouteOption] = []
+    for route_id, provider_route in enumerate(provider_routes, start=1):
+        crowd = score_coordinates(provider_route.coordinates, connection)
+        meets_threshold = (
+            crowd.status == "available"
+            and crowd.crowd_level is not None
+            and route_limit(crowd.crowd_level) <= route_limit(request.max_crowd_level)
+        )
+        options.append(
+            RouteOption(
+                route_id=route_id,
+                distance_metres=provider_route.distance_metres,
+                duration_seconds=provider_route.duration_seconds,
+                coordinates=[{"longitude": longitude, "latitude": latitude} for longitude, latitude in provider_route.coordinates],
+                data_status=crowd.status,
+                crowd_level=crowd.crowd_level,
+                crowd_score=crowd.crowd_score,
+                matched_sensor_count=crowd.matched_sensor_count,
+                latest_data_at=crowd.latest_data_at,
+                meets_crowd_threshold=meets_threshold if crowd.status == "available" else None,
+                recommended=False,
+                warning=crowd.warning,
+            )
         )
 
-    return RouteScoreResponse(
-        status="available",
-        crowd_level=score.crowd_level,
-        crowd_score=score.crowd_score,
-        matched_sensor_count=score.matched_sensor_count,
-        latest_data_at=latest_data_at,
-        warning=None,
+    eligible_options = [option for option in options if option.meets_crowd_threshold]
+    if eligible_options:
+        selected = min(
+            eligible_options,
+            key=lambda option: (route_limit(option.crowd_level or "high"), option.duration_seconds),
+        )
+        selected.recommended = True
+        return RoutesResponse(
+            status="available",
+            requested_max_crowd_level=request.max_crowd_level,
+            recommended_route_id=selected.route_id,
+            routes=options,
+            warning=None,
+        )
+
+    data_is_current = all(option.data_status == "available" for option in options)
+    warning = (
+        "No currently monitored route meets the selected crowd threshold."
+        if data_is_current
+        else "Walking routes are shown, but current crowd data is unavailable or outdated."
+    )
+    return RoutesResponse(
+        status="available" if data_is_current else "degraded",
+        requested_max_crowd_level=request.max_crowd_level,
+        recommended_route_id=None,
+        routes=options,
+        warning=warning,
     )

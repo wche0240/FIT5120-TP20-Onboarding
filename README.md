@@ -12,6 +12,7 @@ SensoryWay helps sensory-sensitive commuters compare Melbourne CBD walking route
 - Backend API: FastAPI and Python
 - Database: PostgreSQL
 - Data processing: Python and pandas
+- Route provider: OpenRouteService, called only by the backend
 
 ## Repository Structure
 
@@ -39,5 +40,7 @@ The first build stores City of Melbourne sensor locations and minute-level pedes
 5. Run the data tests with `docker-compose run --rm etl pytest`.
 
 The API documentation is available at `http://localhost:8000/docs` after the API container starts.
+
+Set `ORS_API_KEY` in the local `.env` before using `POST /api/v1/routes`. Do not commit the key.
 
 The initial Low/Medium/High thresholds are configuration values only. They must be replaced with a documented profiling decision before the Epic 1 release.

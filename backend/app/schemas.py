@@ -46,3 +46,35 @@ class RouteScoreResponse(BaseModel):
     matched_sensor_count: int
     latest_data_at: datetime | None
     warning: str | None
+
+
+CrowdLevel = Literal["low", "medium", "high"]
+
+
+class RoutesRequest(BaseModel):
+    start: GeoPoint
+    destination: GeoPoint
+    max_crowd_level: CrowdLevel = "medium"
+
+
+class RouteOption(BaseModel):
+    route_id: int
+    distance_metres: float
+    duration_seconds: float
+    coordinates: list[GeoPoint]
+    data_status: Literal["available", "stale", "unavailable"]
+    crowd_level: CrowdLevel | None
+    crowd_score: int | None
+    matched_sensor_count: int
+    latest_data_at: datetime | None
+    meets_crowd_threshold: bool | None
+    recommended: bool
+    warning: str | None
+
+
+class RoutesResponse(BaseModel):
+    status: Literal["available", "degraded"]
+    requested_max_crowd_level: CrowdLevel
+    recommended_route_id: int | None
+    routes: list[RouteOption]
+    warning: str | None
