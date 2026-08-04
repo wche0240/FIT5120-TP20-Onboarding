@@ -7,7 +7,6 @@ import {
   ChevronRight,
   CircleUserRound,
   Compass,
-  ListFilter,
   LoaderCircle,
   MapPinned,
   Menu,
@@ -220,7 +219,6 @@ export default function HomePage() {
         <header className="planner-header">
           <div className="brand-mark" aria-hidden="true"><Navigation size={19} fill="currentColor" /></div>
           <div className="brand-copy"><strong>SensoryWay</strong><span>Melbourne CBD</span></div>
-          <button className="icon-button filter-button" aria-label="Route settings"><ListFilter size={20} /></button>
         </header>
 
         <form className="search-panel" onSubmit={planRoute}>
