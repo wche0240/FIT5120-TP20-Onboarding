@@ -43,4 +43,6 @@ The API documentation is available at `http://localhost:8000/docs` after the API
 
 Set `ORS_API_KEY` in the local `.env` before using `POST /api/v1/routes`. Do not commit the key.
 
+Pedestrian data older than 30 minutes is intentionally treated as outdated. SensoryWay still shows physical route options but withholds crowd recommendations; see `docs/epic-1-data-freshness-decision.md` for the recorded decision and evidence.
+
 The initial Low/Medium/High thresholds are configuration values only. They must be replaced with a documented profiling decision before the Epic 1 release.

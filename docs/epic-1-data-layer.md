@@ -48,4 +48,5 @@ The current configuration uses Low `0-50`, Medium `51-150`, and High `151+` pede
 
 - The source only records a minute when at least one pedestrian is detected, so no row does not automatically mean a confirmed zero count.
 - The source is refreshed periodically rather than being a direct sensor stream.
-- This layer does not yet calculate route crowd scores, data freshness warnings, or transport access points; those belong to the backend route-planning stage.
+- The 30-minute freshness decision and its observed source latency are documented in `docs/epic-1-data-freshness-decision.md`.
+- Transport access points remain future Epic 1 work.
