@@ -1,0 +1,70 @@
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.database import get_db
+from app.main import app
+
+
+def mock_connection(row=None, rows=None) -> MagicMock:
+    cursor = MagicMock()
+    cursor.fetchone.return_value = row
+    cursor.fetchall.return_value = rows or []
+    connection = MagicMock()
+    connection.cursor.return_value.__enter__.return_value = cursor
+    return connection
+
+
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    yield
+    app.dependency_overrides.clear()
+
+
+def client_for(connection: MagicMock) -> TestClient:
+    def override_database():
+        yield connection
+
+    app.dependency_overrides[get_db] = override_database
+    return TestClient(app)
+
+
+def test_health_confirms_database_connection() -> None:
+    response = client_for(mock_connection(row={"ok": 1})).get("/api/v1/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "connected"}
+
+
+def test_data_status_reports_available_data() -> None:
+    latest = datetime.now(timezone.utc) - timedelta(minutes=5)
+    response = client_for(mock_connection(row={"latest_data_at": latest})).get("/api/v1/data-status")
+    assert response.status_code == 200
+    assert response.json()["status"] == "available"
+    assert response.json()["age_minutes"] == 5
+
+
+def test_data_status_reports_unavailable_without_rows() -> None:
+    response = client_for(mock_connection(row={"latest_data_at": None})).get("/api/v1/data-status")
+    assert response.status_code == 200
+    assert response.json()["status"] == "unavailable"
+
+
+def test_sensors_returns_map_ready_rows() -> None:
+    rows = [
+        {
+            "location_id": 1,
+            "sensor_name": "Test sensor",
+            "latitude": -37.81,
+            "longitude": 144.96,
+            "status": "A",
+            "last_seen_at": datetime.now(timezone.utc),
+            "total_count": 42,
+            "crowd_level": "low",
+        }
+    ]
+    response = client_for(mock_connection(rows=rows)).get("/api/v1/sensors")
+    assert response.status_code == 200
+    assert response.json()[0]["sensor_name"] == "Test sensor"
+    assert response.json()[0]["crowd_level"] == "low"
