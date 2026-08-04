@@ -24,8 +24,8 @@ services:
       DATA_DIR: /data
       PYTHONPATH: /app
       CITY_TIMEZONE: Australia/Melbourne
-      CROWD_LOW_MAX: ${CROWD_LOW_MAX:-50}
-      CROWD_MEDIUM_MAX: ${CROWD_MEDIUM_MAX:-150}
+      CROWD_LOW_MAX: ${CROWD_LOW_MAX:-10}
+      CROWD_MEDIUM_MAX: ${CROWD_MEDIUM_MAX:-30}
       ETL_PAGE_SIZE: ${ETL_PAGE_SIZE:-100}
       ETL_MAX_RECORDS: ${ETL_MAX_RECORDS:-10000}
       MINUTE_LOOKBACK_MINUTES: ${MINUTE_LOOKBACK_MINUTES:-60}
@@ -37,6 +37,29 @@ services:
         condition: service_healthy
     profiles: ["tools"]
     command: ["python", "-m", "scripts.ingest_open_data"]
+
+  etl-scheduler:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB?Set POSTGRES_DB in .env}
+      DATA_DIR: /data
+      PYTHONPATH: /app
+      CITY_TIMEZONE: Australia/Melbourne
+      CROWD_LOW_MAX: ${CROWD_LOW_MAX:-10}
+      CROWD_MEDIUM_MAX: ${CROWD_MEDIUM_MAX:-30}
+      ETL_PAGE_SIZE: ${ETL_PAGE_SIZE:-100}
+      ETL_MAX_RECORDS: ${ETL_MAX_RECORDS:-10000}
+      MINUTE_LOOKBACK_MINUTES: ${MINUTE_LOOKBACK_MINUTES:-60}
+      ETL_REFRESH_INTERVAL_MINUTES: ${ETL_REFRESH_INTERVAL_MINUTES:-15}
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["python", "-u", "-m", "scripts.run_scheduled_ingest"]
 
   migrate:
     build:

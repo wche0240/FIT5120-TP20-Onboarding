@@ -36,16 +36,19 @@ The first build stores City of Melbourne sensor locations and minute-level pedes
 
 1. Start Docker Desktop.
 2. In PowerShell, copy `.env.example` to `.env` and choose a local PostgreSQL password.
-3. Start the database and API with `docker-compose up -d db api`.
+3. Start the database, API and recurring ETL with `docker-compose up -d db api etl-scheduler`.
 4. Apply database migrations with `docker-compose run --rm migrate`.
-5. Run the data ingestion with `docker-compose run --rm etl`.
-6. Run the data tests with `docker-compose run --rm etl pytest`.
+5. The scheduler immediately ingests Open Data and repeats the refresh every 15 minutes. Use `docker-compose logs -f etl-scheduler` to inspect it.
+6. Run a one-off ingestion when needed with `docker-compose run --rm etl`.
+7. Run the data tests with `docker-compose run --rm etl pytest`.
 
 The API documentation is available at `http://localhost:8000/docs` after the API container starts.
 
 Set `ORS_API_KEY` in the local `.env` before using `POST /api/v1/routes`. Do not commit the key.
 
 Pedestrian data older than 30 minutes is intentionally treated as outdated. SensoryWay still shows physical route options but withholds crowd recommendations; see `docs/epic-1-data-freshness-decision.md` for the recorded decision and evidence.
+
+`ETL_REFRESH_INTERVAL_MINUTES` defaults to 15. This keeps the local database refreshed while correctly preserving the 30-minute freshness warning whenever the official source itself is delayed.
 
 Crowd thresholds are Low `0-10`, Medium `11-30`, and High `31+` pedestrians per minute. They were profiled against the onboarding minute-count snapshot; see `docs/epic-1-crowd-threshold-decision.md` for the evidence, limitations, and required PGP/LeanKit updates.
 

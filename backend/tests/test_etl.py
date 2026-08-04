@@ -1,4 +1,7 @@
+import pytest
+
 from app.etl import clean_minute_counts, clean_sensor_locations, clean_transit_access_points
+from scripts.run_scheduled_ingest import refresh_interval_seconds
 
 
 def test_clean_sensor_locations_removes_duplicate_sensor_ids() -> None:
@@ -73,3 +76,14 @@ def test_clean_transit_access_points_keeps_supported_cbd_stops() -> None:
         }
     )
     assert rows == [("tram:100", "CBD Tram Stop", "tram", "METRO TRAM", -37.8136, 144.9631)]
+
+
+def test_scheduler_defaults_to_a_fifteen_minute_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ETL_REFRESH_INTERVAL_MINUTES", raising=False)
+    assert refresh_interval_seconds() == 15 * 60
+
+
+def test_scheduler_rejects_a_non_positive_refresh_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_REFRESH_INTERVAL_MINUTES", "0")
+    with pytest.raises(ValueError, match="at least 1 minute"):
+        refresh_interval_seconds()
