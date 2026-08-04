@@ -13,6 +13,8 @@
 | `GET /api/v1/health` | Confirms the API can reach PostgreSQL. |
 | `GET /api/v1/data-status` | Reports whether the newest minute-count data is available, stale, or unavailable. |
 | `GET /api/v1/sensors` | Returns map-ready sensor locations and each sensor's latest crowd reading. |
+| `GET /api/v1/location-search` | Resolves a user-submitted Melbourne CBD destination. |
+| `GET /api/v1/transit-access-points` | Returns CBD public-transport access points, optionally ranked by distance. |
 | `POST /api/v1/route-score` | Scores supplied route coordinates against nearby fresh sensor readings. |
 | `POST /api/v1/routes` | Creates and scores up to three walking route options. |
 
@@ -21,6 +23,8 @@
 ## Route Scoring and Recommendations
 
 The route-score endpoint uses an 80-metre configurable sensor radius and the busiest matched sensor as a conservative crowd score. It returns no score if data is stale or the route has no sensor coverage.
+
+Crowd levels use Low `0-10`, Medium `11-30`, and High `31+` pedestrians per minute. The data profile and review process are recorded in `docs/epic-1-crowd-threshold-decision.md`.
 
 `POST /api/v1/routes` accepts a start point, a Melbourne CBD destination, and the user's maximum acceptable crowd level (`low`, `medium`, or `high`).
 

@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import get_db
-from app.main import app
+from app.main import app, crowd_thresholds
 from app.routing import WalkingRoute
 
 
@@ -36,6 +36,12 @@ def test_health_confirms_database_connection() -> None:
     response = client_for(mock_connection(row={"ok": 1})).get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "connected"}
+
+
+def test_profiled_crowd_thresholds_are_the_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CROWD_LOW_MAX", raising=False)
+    monkeypatch.delenv("CROWD_MEDIUM_MAX", raising=False)
+    assert crowd_thresholds() == (10, 30)
 
 
 def test_data_status_reports_available_data() -> None:

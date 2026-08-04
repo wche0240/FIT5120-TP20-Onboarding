@@ -50,8 +50,8 @@ def stale_after_minutes() -> int:
 
 
 def crowd_thresholds() -> tuple[int, int]:
-    low_max = int(os.getenv("CROWD_LOW_MAX", "50"))
-    medium_max = int(os.getenv("CROWD_MEDIUM_MAX", "150"))
+    low_max = int(os.getenv("CROWD_LOW_MAX", "10"))
+    medium_max = int(os.getenv("CROWD_MEDIUM_MAX", "30"))
     if low_max < 0 or medium_max < low_max:
         raise RuntimeError("Crowd thresholds are invalid")
     return low_max, medium_max

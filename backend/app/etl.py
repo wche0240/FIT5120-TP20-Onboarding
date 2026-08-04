@@ -289,8 +289,8 @@ def ingest() -> None:
     data_dir = Path(os.getenv("DATA_DIR", "/data"))
     page_size = int(os.getenv("ETL_PAGE_SIZE", "100"))
     max_records = int(os.getenv("ETL_MAX_RECORDS", "20000"))
-    low_max = int(os.getenv("CROWD_LOW_MAX", "50"))
-    medium_max = int(os.getenv("CROWD_MEDIUM_MAX", "150"))
+    low_max = int(os.getenv("CROWD_LOW_MAX", "10"))
+    medium_max = int(os.getenv("CROWD_MEDIUM_MAX", "30"))
     city_timezone = os.getenv("CITY_TIMEZONE", "Australia/Melbourne")
     lookback_minutes = int(os.getenv("MINUTE_LOOKBACK_MINUTES", "60"))
 
@@ -328,13 +328,18 @@ def ingest() -> None:
             finish_refresh(conn, minute_refresh, "succeeded", len(minute_records), len(minute_rows))
             completed_refreshes.add(minute_refresh)
 
-            transit_response = requests.get(TRANSIT_STOPS_URL, timeout=60)
-            transit_response.raise_for_status()
-            transit_payload = transit_response.json()
-            archive_raw_records(TRANSIT_STOPS_DATASET, transit_payload, data_dir)
-            transit_rows = clean_transit_access_points(transit_payload)
-            upsert_transit_access_points(conn, transit_rows)
-            finish_refresh(conn, transit_refresh, "succeeded", len(transit_payload.get("features", [])), len(transit_rows))
+            try:
+                transit_response = requests.get(TRANSIT_STOPS_URL, timeout=60)
+                transit_response.raise_for_status()
+                transit_payload = transit_response.json()
+                archive_raw_records(TRANSIT_STOPS_DATASET, transit_payload, data_dir)
+                transit_rows = clean_transit_access_points(transit_payload)
+                upsert_transit_access_points(conn, transit_rows)
+                finish_refresh(conn, transit_refresh, "succeeded", len(transit_payload.get("features", [])), len(transit_rows))
+            except Exception as transit_error:
+                # Existing access points remain available when this non-critical refresh is unavailable.
+                finish_refresh(conn, transit_refresh, "failed", 0, 0, str(transit_error))
+                print(f"Public transport stop refresh failed; retained existing access points: {transit_error}")
             completed_refreshes.add(transit_refresh)
             conn.commit()
         except Exception as error:

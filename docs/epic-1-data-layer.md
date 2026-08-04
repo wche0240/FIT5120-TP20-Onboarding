@@ -42,11 +42,11 @@ The public API does not permit unrestricted deep pagination. The ETL therefore r
 
 ## Crowd Levels
 
-The current configuration uses Low `0-50`, Medium `51-150`, and High `151+` pedestrians per minute. These values are provisional. Before the Epic 1 release, profile the historical distributions and record the approved threshold method in the PGP and LeanKit evidence.
+The current configuration uses Low `0-10`, Medium `11-30`, and High `31+` pedestrians per minute. It is derived from the 5 August 2026 minute-count snapshot and is documented in `docs/epic-1-crowd-threshold-decision.md`. The threshold decision must be reviewed after user testing or when the project adds a materially larger historical dataset.
 
 ## Current Limitations
 
 - The source only records a minute when at least one pedestrian is detected, so no row does not automatically mean a confirmed zero count.
 - The source is refreshed periodically rather than being a direct sensor stream.
 - The 30-minute freshness decision and its observed source latency are documented in `docs/epic-1-data-freshness-decision.md`.
-- Transport access points remain future Epic 1 work.
+- Access-point data is limited to the Melbourne CBD onboarding boundary; see `docs/epic-1-public-transport-integration.md`.
