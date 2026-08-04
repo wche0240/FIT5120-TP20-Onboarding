@@ -8,7 +8,7 @@ SensoryWay uses the Google Maps JavaScript API only for the interactive map back
 2. Enable **Maps JavaScript API** for that project.
 3. Create an API key and restrict it:
    - **Application restriction:** Websites.
-   - **Allowed referrer for local development:** `http://localhost:3000/*`.
+   - **Allowed referrers for local development:** `http://localhost:3000/*` and `http://localhost:3001/*`.
    - Add the production site address before deployment.
    - **API restriction:** Maps JavaScript API only.
 4. Set a budget alert and a quota alert in Google Cloud Billing.
@@ -22,7 +22,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-restricted-browser-key
 ```
 
-Restart `npm.cmd run dev` after saving the file, then open `http://localhost:3000`.
+Restart `npm.cmd run dev` after saving the file, then open the local address printed by Next.js (normally `http://localhost:3000`).
 
 `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is delivered to the browser by design. It is safe only when the key is restricted to the approved websites and to Maps JavaScript API. Never put the backend `ORS_API_KEY` in this file.
 
