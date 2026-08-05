@@ -62,6 +62,8 @@ type LocationSearchResult = {
   latitude: number;
 };
 
+type SearchField = "start" | "destination";
+
 type AppView = "explore" | "saved" | "profile";
 
 type SavedRoute = {
@@ -95,6 +97,15 @@ function findPlace(label: string) {
   return PLACES.find((place) => place.label.toLowerCase() === label.trim().toLowerCase());
 }
 
+function placeFromSearchResult(location: LocationSearchResult): Place {
+  return {
+    label: location.name,
+    detail: location.display_name,
+    longitude: location.longitude,
+    latitude: location.latitude,
+  };
+}
+
 function formatDistance(metres: number) {
   return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }
@@ -113,7 +124,12 @@ function routeLabel(route: ApiRoute) {
 export default function HomePage() {
   const [startLabel, setStartLabel] = useState("Melbourne Central");
   const [destinationLabel, setDestinationLabel] = useState("Collins Street destination");
+  const [resolvedStart, setResolvedStart] = useState<Place | null>(PLACES[0]);
   const [resolvedDestination, setResolvedDestination] = useState<Place | null>(PLACES[4]);
+  const [locationSearchField, setLocationSearchField] = useState<SearchField | null>(null);
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSearchResult[]>([]);
+  const [locationSearchError, setLocationSearchError] = useState<string | null>(null);
+  const [isSearchingLocations, setIsSearchingLocations] = useState(false);
   const [crowdLevel, setCrowdLevel] = useState<CrowdLevel>("medium");
   const [result, setResult] = useState<RoutesResponse | null>(null);
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null);
@@ -126,8 +142,8 @@ export default function HomePage() {
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
   const [savedRoutesLoaded, setSavedRoutesLoaded] = useState(false);
 
-  const start = findPlace(startLabel) ?? PLACES[0];
-  const destination = findPlace(destinationLabel) ?? resolvedDestination ?? PLACES[4];
+  const start = resolvedStart ?? findPlace(startLabel) ?? PLACES[0];
+  const destination = resolvedDestination ?? findPlace(destinationLabel) ?? PLACES[4];
   const activeRoute = useMemo(() => result?.routes.find((route) => route.route_id === activeRouteId) ?? null, [activeRouteId, result]);
 
   useEffect(() => {
@@ -179,39 +195,77 @@ export default function HomePage() {
     }
   }
 
-  async function resolveDestination() {
-    const suggestedPlace = findPlace(destinationLabel);
-    if (suggestedPlace) return suggestedPlace;
+  async function searchLocations(query: string) {
+    if (query.trim().length < 3) {
+      throw new Error("Enter at least three characters to search for an address.");
+    }
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/location-search?query=${encodeURIComponent(destinationLabel.trim())}`);
+    const response = await fetch(`${API_BASE_URL}/api/v1/location-search?query=${encodeURIComponent(query.trim())}`);
     const body = (await response.json()) as LocationSearchResult[] | { detail?: string };
     if (!response.ok || !Array.isArray(body)) {
-      throw new Error("detail" in body ? body.detail ?? "Could not search for that destination." : "Could not search for that destination.");
+      throw new Error("detail" in body ? body.detail ?? "Could not search for that address." : "Could not search for that address.");
     }
-    const selectedLocation = body[0];
+    return body;
+  }
+
+  async function resolvePlace(label: string, resolvedPlace: Place | null, field: SearchField) {
+    const suggestedPlace = findPlace(label);
+    if (suggestedPlace) return suggestedPlace;
+    if (resolvedPlace) return resolvedPlace;
+
+    const matches = await searchLocations(label);
+    const selectedLocation = matches[0];
     if (!selectedLocation) {
-      throw new Error("No matching destination was found inside the Melbourne CBD.");
+      throw new Error(`No matching ${field} was found inside the Melbourne CBD.`);
     }
-    return {
-      label: selectedLocation.name,
-      detail: selectedLocation.display_name,
-      longitude: selectedLocation.longitude,
-      latitude: selectedLocation.latitude,
-    };
+    return placeFromSearchResult(selectedLocation);
+  }
+
+  async function searchAddress(field: SearchField) {
+    const query = field === "start" ? startLabel : destinationLabel;
+    setLocationSearchField(field);
+    setLocationSearchError(null);
+    setLocationSuggestions([]);
+    setIsSearchingLocations(true);
+
+    try {
+      const matches = await searchLocations(query);
+      setLocationSuggestions(matches);
+      if (matches.length === 0) {
+        setLocationSearchError("No matching address was found inside the Melbourne CBD.");
+      }
+    } catch (searchError) {
+      setLocationSearchError(searchError instanceof Error ? searchError.message : "Could not search for that address.");
+    } finally {
+      setIsSearchingLocations(false);
+    }
+  }
+
+  function selectAddress(field: SearchField, location: LocationSearchResult) {
+    const place = placeFromSearchResult(location);
+    if (field === "start") {
+      setStartLabel(place.label);
+      setResolvedStart(place);
+    } else {
+      setDestinationLabel(place.label);
+      setResolvedDestination(place);
+    }
+    setLocationSearchField(null);
+    setLocationSuggestions([]);
+    setLocationSearchError(null);
   }
 
   async function planRoute(event?: FormEvent) {
     event?.preventDefault();
-    const selectedStart = findPlace(startLabel);
-    if (!selectedStart) {
-      setError("Choose a start from the Melbourne CBD suggestions.");
-      return;
-    }
 
     setIsLoading(true);
     setError(null);
     try {
-      const selectedDestination = await resolveDestination();
+      const [selectedStart, selectedDestination] = await Promise.all([
+        resolvePlace(startLabel, resolvedStart, "start"),
+        resolvePlace(destinationLabel, resolvedDestination, "destination"),
+      ]);
+      setResolvedStart(selectedStart);
       setResolvedDestination(selectedDestination);
       const response = await fetch(`${API_BASE_URL}/api/v1/routes`, {
         method: "POST",
@@ -262,6 +316,7 @@ export default function HomePage() {
   function restoreSavedRoute(savedRoute: SavedRoute) {
     setStartLabel(savedRoute.startLabel);
     setDestinationLabel(savedRoute.destinationLabel);
+    setResolvedStart(findPlace(savedRoute.startLabel) ?? null);
     setResolvedDestination(findPlace(savedRoute.destinationLabel) ?? null);
     setCrowdLevel(savedRoute.crowdLevel);
     selectView("explore");
@@ -294,15 +349,30 @@ export default function HomePage() {
               <div className="place-field">
                 <MapPinned size={18} aria-hidden="true" />
                 <label htmlFor="start-place">Start</label>
-                <input id="start-place" list="cbd-places" value={startLabel} onChange={(event) => setStartLabel(event.target.value)} placeholder="Choose a start point" />
+                <input id="start-place" value={startLabel} autoComplete="off" onChange={(event) => { setStartLabel(event.target.value); setResolvedStart(null); setLocationSearchField(null); setLocationSuggestions([]); setLocationSearchError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void searchAddress("start"); } }} placeholder="Enter a CBD address or landmark" />
+                <button className="address-search-button" type="button" aria-label="Search start address" title="Search start address" onClick={() => void searchAddress("start")} disabled={isSearchingLocations}>
+                  {isSearchingLocations && locationSearchField === "start" ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}
+                </button>
               </div>
+              {locationSearchField === "start" ? <div className="address-results" role="listbox" aria-label="Start address results">
+                {isSearchingLocations ? <p>Searching addresses...</p> : null}
+                {!isSearchingLocations && locationSearchError ? <p>{locationSearchError}</p> : null}
+                {!isSearchingLocations && !locationSearchError ? locationSuggestions.map((location) => <button key={`${location.longitude}:${location.latitude}`} type="button" role="option" onClick={() => selectAddress("start", location)}><MapPinned size={17} /><span><strong>{location.name}</strong><small>{location.display_name}</small></span></button>) : null}
+              </div> : null}
               <div className="place-field">
                 <Search size={18} aria-hidden="true" />
                 <label htmlFor="destination-place">Destination</label>
-                <input id="destination-place" list="cbd-places" value={destinationLabel} onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); }} placeholder="Enter a CBD address or landmark" />
+                <input id="destination-place" value={destinationLabel} autoComplete="off" onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); setLocationSearchField(null); setLocationSuggestions([]); setLocationSearchError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void searchAddress("destination"); } }} placeholder="Enter a CBD address or landmark" />
+                <button className="address-search-button" type="button" aria-label="Search destination address" title="Search destination address" onClick={() => void searchAddress("destination")} disabled={isSearchingLocations}>
+                  {isSearchingLocations && locationSearchField === "destination" ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}
+                </button>
               </div>
+              {locationSearchField === "destination" ? <div className="address-results" role="listbox" aria-label="Destination address results">
+                {isSearchingLocations ? <p>Searching addresses...</p> : null}
+                {!isSearchingLocations && locationSearchError ? <p>{locationSearchError}</p> : null}
+                {!isSearchingLocations && !locationSearchError ? locationSuggestions.map((location) => <button key={`${location.longitude}:${location.latitude}`} type="button" role="option" onClick={() => selectAddress("destination", location)}><MapPinned size={17} /><span><strong>{location.name}</strong><small>{location.display_name}</small></span></button>) : null}
+              </div> : null}
             </div>
-            <datalist id="cbd-places">{PLACES.map((place) => <option key={place.label} value={place.label}>{place.detail}</option>)}</datalist>
             <button className="plan-button" type="submit" disabled={isLoading} aria-label={isLoading ? "Finding routes" : "Find routes"}>
               {isLoading ? <LoaderCircle className="spin" size={19} /> : <Route size={19} />}
               <span>{isLoading ? "Finding routes" : "Find routes"}</span>
@@ -374,7 +444,7 @@ export default function HomePage() {
               ) : null}
             </>
           ) : (
-            <div className="empty-state"><Navigation size={22} /><div><h2>Plan a sensory-aware walk</h2><p>Choose a start suggestion and enter any Melbourne CBD address or landmark as the destination.</p></div></div>
+            <div className="empty-state"><Navigation size={22} /><div><h2>Plan a sensory-aware walk</h2><p>Search for Melbourne CBD addresses or landmarks at each end of your walk.</p></div></div>
           )}
         </section>
 

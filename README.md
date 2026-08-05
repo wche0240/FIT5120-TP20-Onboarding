@@ -54,7 +54,7 @@ Crowd thresholds are Low `0-10`, Medium `11-30`, and High `31+` pedestrians per 
 
 ## CBD Destination Search
 
-Users can enter a Melbourne CBD address, street or landmark as the route destination. The backend resolves the destination only after the user selects `Find routes`, then rejects results outside the onboarding MVP boundary. The default low-volume geocoder is configurable through `GEOCODER_SEARCH_URL`; see `docs/epic-1-destination-search.md` for privacy, rate-limit and acceptance-test guidance.
+Users can enter a Melbourne CBD address, street or landmark for either end of a walk. Select the search icon or press Enter in a field, choose a returned address, then select `Find routes`. The backend rejects results outside the onboarding MVP boundary. The default low-volume geocoder is configurable through `GEOCODER_SEARCH_URL`; see `docs/epic-1-destination-search.md` for privacy, rate-limit and acceptance-test guidance.
 
 ## Public Transport Access Points
 
