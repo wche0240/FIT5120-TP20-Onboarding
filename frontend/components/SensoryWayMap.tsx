@@ -181,29 +181,27 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
       const polyline = new google.maps.Polyline({
         map,
         path: route.coordinates.map(pointToLatLng),
-        strokeColor: isActive && route.crowd_segments.length > 0 ? "#2d6cdf" : routeColour(route, activeRouteId),
-        strokeOpacity: isActive ? 1 : 0.72,
+        strokeColor: route.crowd_segments.length > 0 ? "#2d6cdf" : routeColour(route, activeRouteId),
+        strokeOpacity: isActive ? 1 : 0.48,
         strokeWeight: isActive ? 7 : 5,
         zIndex: isActive ? 6 : 4,
       });
       polyline.addListener("click", () => onRouteSelect(route.route_id));
       nextOverlays.push(polyline);
 
-      if (isActive) {
-        route.crowd_segments.forEach((segment) => {
-          if (!segment.crowd_level) return;
-          const segmentPolyline = new google.maps.Polyline({
-            map,
-            path: segment.coordinates.map(pointToLatLng),
-            strokeColor: segmentColour(segment.crowd_level),
-            strokeOpacity: 1,
-            strokeWeight: 7,
-            zIndex: 8,
-          });
-          segmentPolyline.addListener("click", () => onRouteSelect(route.route_id));
-          nextOverlays.push(segmentPolyline);
+      route.crowd_segments.forEach((segment) => {
+        if (!segment.crowd_level) return;
+        const segmentPolyline = new google.maps.Polyline({
+          map,
+          path: segment.coordinates.map(pointToLatLng),
+          strokeColor: segmentColour(segment.crowd_level),
+          strokeOpacity: isActive ? 1 : 0.68,
+          strokeWeight: isActive ? 7 : 5,
+          zIndex: isActive ? 8 : 5,
         });
-      }
+        segmentPolyline.addListener("click", () => onRouteSelect(route.route_id));
+        nextOverlays.push(segmentPolyline);
+      });
     });
 
     nextOverlays.push(

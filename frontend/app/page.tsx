@@ -459,7 +459,7 @@ export default function HomePage() {
               </div>
               <p className="route-detail">Destination: {destination.label}.</p>
               {activeRoute?.crowd_score !== null && activeRoute?.crowd_score !== undefined ? <p className="route-detail">Peak nearby reading: {activeRoute.crowd_score} pedestrians per minute across {activeRoute.matched_sensor_count} nearby sensors.</p> : <p className="route-detail">Crowd levels are hidden until the latest official pedestrian data is within the 45-minute freshness window.</p>}
-              {activeRoute?.crowd_segments.length ? <p className="route-detail">Map colours show recent sensor coverage on the selected route: green low, orange medium, red high, and blue where no nearby sensor covers the path.</p> : null}
+              {result.routes.some((route) => route.crowd_segments.length > 0) ? <p className="route-detail">Map colours show recent sensor coverage on every route: green low, orange medium, red high, and blue where no nearby sensor covers the path. The selected route is shown more strongly.</p> : null}
               {(nearbyTransit.start.length > 0 || nearbyTransit.destination.length > 0) ? (
                 <div className="transit-summary">
                   <div><TrainFront size={17} /><strong>Public transport access</strong></div>
