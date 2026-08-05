@@ -18,7 +18,7 @@
 | `POST /api/v1/route-score` | Scores supplied route coordinates against nearby fresh sensor readings. |
 | `POST /api/v1/routes` | Creates and scores up to three walking route options. |
 
-`DATA_STALE_AFTER_MINUTES` defaults to 30 minutes. The frontend must use `data-status` before presenting crowd levels as current information. The rationale and observed public-data latency are recorded in `docs/epic-1-data-freshness-decision.md`.
+`DATA_STALE_AFTER_MINUTES` defaults to 45 minutes. The frontend must use `data-status` before presenting crowd levels as recent information. The rationale and observed public-data latency are recorded in `docs/epic-1-data-freshness-decision.md`.
 
 ## Route Scoring and Recommendations
 

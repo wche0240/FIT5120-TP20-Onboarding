@@ -345,7 +345,7 @@ export default function HomePage() {
                   <h2>{result.recommended_route_id ? "Crowd preference applied" : "Walking routes"}</h2>
                 </div>
                 <div className="result-actions">
-                  <span className={result.status === "available" ? "status-chip available" : "status-chip stale"}>{result.status === "available" ? "Current data" : "Crowd data delayed"}</span>
+                  <span className={result.status === "available" ? "status-chip available" : "status-chip stale"}>{result.status === "available" ? "Recent data" : "Crowd data delayed"}</span>
                   {activeRoute ? <button className={activeRouteIsSaved ? "save-route-button saved" : "save-route-button"} type="button" aria-label={activeRouteIsSaved ? "Route saved" : "Save current route"} title={activeRouteIsSaved ? "Route saved" : "Save current route"} onClick={saveActiveRoute}>
                     {activeRouteIsSaved ? <BookmarkCheck size={18} /> : <BookmarkPlus size={18} />}
                   </button> : null}
@@ -364,7 +364,7 @@ export default function HomePage() {
                 ))}
               </div>
               <p className="route-detail">Destination: {destination.label}.</p>
-              {activeRoute?.crowd_score !== null && activeRoute?.crowd_score !== undefined ? <p className="route-detail">Peak nearby reading: {activeRoute.crowd_score} pedestrians per minute across {activeRoute.matched_sensor_count} nearby sensors.</p> : <p className="route-detail">Crowd levels are hidden until the latest official pedestrian data is within the 30-minute freshness window.</p>}
+              {activeRoute?.crowd_score !== null && activeRoute?.crowd_score !== undefined ? <p className="route-detail">Peak nearby reading: {activeRoute.crowd_score} pedestrians per minute across {activeRoute.matched_sensor_count} nearby sensors.</p> : <p className="route-detail">Crowd levels are hidden until the latest official pedestrian data is within the 45-minute freshness window.</p>}
               {(nearbyTransit.start.length > 0 || nearbyTransit.destination.length > 0) ? (
                 <div className="transit-summary">
                   <div><TrainFront size={17} /><strong>Public transport access</strong></div>

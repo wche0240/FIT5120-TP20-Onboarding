@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import get_db
-from app.main import app, crowd_thresholds
+from app.main import app, crowd_thresholds, stale_after_minutes
 from app.routing import WalkingRoute
 
 
@@ -50,6 +50,15 @@ def test_data_status_reports_available_data() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "available"
     assert response.json()["age_minutes"] == 5
+
+
+def test_default_freshness_window_accepts_data_up_to_45_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DATA_STALE_AFTER_MINUTES", raising=False)
+    latest = datetime.now(timezone.utc) - timedelta(minutes=40)
+    response = client_for(mock_connection(row={"latest_data_at": latest})).get("/api/v1/data-status")
+    assert stale_after_minutes() == 45
+    assert response.status_code == 200
+    assert response.json()["status"] == "available"
 
 
 def test_data_status_reports_unavailable_without_rows() -> None:

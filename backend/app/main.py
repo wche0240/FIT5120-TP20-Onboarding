@@ -43,7 +43,7 @@ app.add_middleware(
 
 
 def stale_after_minutes() -> int:
-    configured_minutes = int(os.getenv("DATA_STALE_AFTER_MINUTES", "30"))
+    configured_minutes = int(os.getenv("DATA_STALE_AFTER_MINUTES", "45"))
     if configured_minutes <= 0:
         raise RuntimeError("DATA_STALE_AFTER_MINUTES must be positive")
     return configured_minutes
