@@ -24,6 +24,18 @@ class RouteCrowdScore:
     matched_sensor_count: int
 
 
+@dataclass(frozen=True)
+class RouteCrowdSegment:
+    coordinates: list[tuple[float, float]]
+    crowd_level: str | None
+    crowd_score: int | None
+    matched_sensor_ids: frozenset[int]
+
+    @property
+    def matched_sensor_count(self) -> int:
+        return len(self.matched_sensor_ids)
+
+
 def point_to_segment_distance_metres(
     latitude: float,
     longitude: float,
@@ -92,3 +104,68 @@ def score_route(
         crowd_level=classify_crowd_level(crowd_score, low_max, medium_max),
         matched_sensor_count=len(matched_counts),
     )
+
+
+def assess_route_segments(
+    coordinates: list[tuple[float, float]],
+    readings: Iterable[SensorReading],
+    sensor_radius_metres: int,
+    low_max: int,
+    medium_max: int,
+) -> list[RouteCrowdSegment]:
+    """Attach the latest nearby sensor reading to each route section.
+
+    A section without a nearby official sensor remains unknown rather than being
+    represented as low crowd. Adjacent sections at the same level are merged so
+    the map receives a small, readable set of overlay polylines.
+    """
+    reading_list = list(readings)
+    assessed_segments: list[RouteCrowdSegment] = []
+
+    for start, end in zip(coordinates, coordinates[1:]):
+        start_longitude, start_latitude = start
+        end_longitude, end_latitude = end
+        nearby_readings = [
+            reading
+            for reading in reading_list
+            if point_to_segment_distance_metres(
+                reading.latitude,
+                reading.longitude,
+                start_latitude,
+                start_longitude,
+                end_latitude,
+                end_longitude,
+            ) <= sensor_radius_metres
+        ]
+
+        crowd_score = max((reading.total_count for reading in nearby_readings), default=None)
+        crowd_level = (
+            classify_crowd_level(crowd_score, low_max, medium_max)
+            if crowd_score is not None
+            else None
+        )
+        sensor_ids = frozenset(reading.location_id for reading in nearby_readings)
+
+        if assessed_segments and assessed_segments[-1].crowd_level == crowd_level:
+            previous = assessed_segments[-1]
+            assessed_segments[-1] = RouteCrowdSegment(
+                coordinates=[*previous.coordinates, end],
+                crowd_level=crowd_level,
+                crowd_score=max(
+                    (score for score in (previous.crowd_score, crowd_score) if score is not None),
+                    default=None,
+                ),
+                matched_sensor_ids=previous.matched_sensor_ids | sensor_ids,
+            )
+            continue
+
+        assessed_segments.append(
+            RouteCrowdSegment(
+                coordinates=[start, end],
+                crowd_level=crowd_level,
+                crowd_score=crowd_score,
+                matched_sensor_ids=sensor_ids,
+            )
+        )
+
+    return assessed_segments

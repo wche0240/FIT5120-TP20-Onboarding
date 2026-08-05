@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+CrowdLevel = Literal["low", "medium", "high"]
+
 
 class HealthResponse(BaseModel):
     status: Literal["ok"]
@@ -35,6 +37,13 @@ class GeoPoint(BaseModel):
     latitude: float = Field(ge=-90, le=90)
 
 
+class RouteCrowdSegment(BaseModel):
+    coordinates: list[GeoPoint] = Field(min_length=2)
+    crowd_level: CrowdLevel | None
+    crowd_score: int | None
+    matched_sensor_count: int
+
+
 class LocationSearchResult(BaseModel):
     name: str
     display_name: str
@@ -53,9 +62,7 @@ class RouteScoreResponse(BaseModel):
     matched_sensor_count: int
     latest_data_at: datetime | None
     warning: str | None
-
-
-CrowdLevel = Literal["low", "medium", "high"]
+    crowd_segments: list[RouteCrowdSegment] = Field(default_factory=list)
 TransitMode = Literal["bus", "tram", "train", "coach"]
 
 
@@ -85,6 +92,7 @@ class RouteOption(BaseModel):
     crowd_score: int | None
     matched_sensor_count: int
     latest_data_at: datetime | None
+    crowd_segments: list[RouteCrowdSegment] = Field(default_factory=list)
     meets_crowd_threshold: bool | None
     recommended: bool
     warning: str | None

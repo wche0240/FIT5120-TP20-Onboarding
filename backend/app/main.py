@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
 from app.geocoding import GeocodingError, is_in_melbourne_cbd, search_cbd_locations
-from app.route_scoring import SensorReading, score_route
+from app.route_scoring import SensorReading, assess_route_segments, score_route
 from app.routing import OpenRouteServiceError, request_walking_routes
 from app.schemas import (
     DataStatusResponse,
@@ -137,6 +137,14 @@ def score_coordinates(
             warning="No pedestrian sensors cover this route.",
         )
 
+    route_segments = assess_route_segments(
+        coordinates,
+        readings,
+        sensor_radius_metres=int(os.getenv("ROUTE_SENSOR_RADIUS_METRES", "80")),
+        low_max=low_max,
+        medium_max=medium_max,
+    )
+
     return RouteScoreResponse(
         status="available",
         crowd_level=score.crowd_level,
@@ -144,6 +152,15 @@ def score_coordinates(
         matched_sensor_count=score.matched_sensor_count,
         latest_data_at=latest_data_at,
         warning=None,
+        crowd_segments=[
+            {
+                "coordinates": [{"longitude": longitude, "latitude": latitude} for longitude, latitude in segment.coordinates],
+                "crowd_level": segment.crowd_level,
+                "crowd_score": segment.crowd_score,
+                "matched_sensor_count": segment.matched_sensor_count,
+            }
+            for segment in route_segments
+        ],
     )
 
 
@@ -341,6 +358,7 @@ def routes(
                 crowd_score=crowd.crowd_score,
                 matched_sensor_count=crowd.matched_sensor_count,
                 latest_data_at=crowd.latest_data_at,
+                crowd_segments=crowd.crowd_segments,
                 meets_crowd_threshold=meets_threshold if crowd.status == "available" else None,
                 recommended=False,
                 warning=crowd.warning,
