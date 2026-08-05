@@ -34,6 +34,7 @@ type SensoryWayMapProps = {
   destination: MapPoint;
   routes: MapRoute[];
   transitAccessPoints: TransitAccessPoint[];
+  crowdDataAvailable: boolean;
   activeRouteId: number | null;
   onRouteSelect: (routeId: number) => void;
   onTransitPointSelect: (field: "start" | "destination", accessPoint: TransitAccessPoint) => void;
@@ -55,27 +56,12 @@ function loadMapsLibrary(apiKey: string) {
   return mapsLibraryPromise;
 }
 
-function routeColour(route: MapRoute, activeRouteId: number | null) {
-  if (route.route_id === activeRouteId || route.recommended) return "#169b53";
-  if (route.crowd_level === "high") return "#dc3f3f";
-  if (route.crowd_level === "medium") return "#df8a16";
-  return "#2d6cdf";
-}
-
 function segmentColour(crowdLevel: "low" | "medium" | "high") {
   return { low: "#188038", medium: "#f9ab00", high: "#d93025" }[crowdLevel];
 }
 
 function segmentOutlineColour(crowdLevel: "low" | "medium" | "high") {
   return { low: "#0b5c31", medium: "#a66300", high: "#a71c18" }[crowdLevel];
-}
-
-function routeOutlineColour(route: MapRoute, activeRouteId: number | null) {
-  if (route.crowd_segments.length > 0) return "#1a4f9c";
-  if (route.route_id === activeRouteId || route.recommended) return "#0b6e39";
-  if (route.crowd_level === "high") return "#9f251f";
-  if (route.crowd_level === "medium") return "#9b5900";
-  return "#1a4f9c";
 }
 
 function transitColour(mode: TransitAccessPoint["mode"]) {
@@ -122,7 +108,7 @@ function createTransitInfo(accessPoint: TransitAccessPoint, onSelect: (field: "s
   return container;
 }
 
-export default function SensoryWayMap({ start, destination, routes, transitAccessPoints, activeRouteId, onRouteSelect, onTransitPointSelect }: SensoryWayMapProps) {
+export default function SensoryWayMap({ start, destination, routes, transitAccessPoints, crowdDataAvailable, activeRouteId, onRouteSelect, onTransitPointSelect }: SensoryWayMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const overlaysRef = useRef<MapOverlay[]>([]);
@@ -191,7 +177,6 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
     routes.forEach((route) => {
       const isActive = route.route_id === activeRouteId;
       const path = route.coordinates.map(pointToLatLng);
-      const routeFill = route.crowd_segments.length > 0 ? "#4285f4" : routeColour(route, activeRouteId);
       const baseOpacity = isActive ? 1 : 0.6;
       const baseWeight = isActive ? 6 : 4;
 
@@ -207,7 +192,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
       const routeOutline = new google.maps.Polyline({
         map,
         path,
-        strokeColor: routeOutlineColour(route, activeRouteId),
+        strokeColor: "#1a4f9c",
         strokeOpacity: baseOpacity,
         strokeWeight: baseWeight + 3,
         zIndex: isActive ? 4 : 2,
@@ -215,7 +200,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
       const polyline = new google.maps.Polyline({
         map,
         path,
-        strokeColor: routeFill,
+        strokeColor: "#4285f4",
         strokeOpacity: baseOpacity,
         strokeWeight: baseWeight,
         zIndex: isActive ? 5 : 3,
@@ -226,7 +211,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
       });
 
       route.crowd_segments.forEach((segment) => {
-        if (!segment.crowd_level) return;
+        if (!crowdDataAvailable || !segment.crowd_level) return;
         const segmentWeight = isActive ? 6 : 4;
         const segmentOpacity = isActive ? 1 : 0.78;
         const segmentPath = segment.coordinates.map(pointToLatLng);
