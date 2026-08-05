@@ -30,6 +30,7 @@ type SensoryWayMapProps = {
   transitAccessPoints: TransitAccessPoint[];
   activeRouteId: number | null;
   onRouteSelect: (routeId: number) => void;
+  onTransitPointSelect: (field: "start" | "destination", accessPoint: TransitAccessPoint) => void;
 };
 
 type MapOverlay = google.maps.Marker | google.maps.Polyline;
@@ -74,18 +75,32 @@ function markerIcon(fillColor: string, scale: number): google.maps.Symbol {
   };
 }
 
-function createTransitInfo(accessPoint: TransitAccessPoint) {
+function createTransitInfo(accessPoint: TransitAccessPoint, onSelect: (field: "start" | "destination") => void) {
   const container = document.createElement("div");
+  const actions = document.createElement("div");
   const name = document.createElement("strong");
   const details = document.createElement("div");
+  const startButton = document.createElement("button");
+  const destinationButton = document.createElement("button");
 
+  container.className = "transit-info-window";
+  actions.className = "transit-info-actions";
   name.textContent = accessPoint.name;
   details.textContent = `${accessPoint.mode} stop`;
-  container.append(name, details);
+  startButton.type = "button";
+  startButton.textContent = "Set as start";
+  startButton.setAttribute("aria-label", `Set ${accessPoint.name} as start`);
+  startButton.addEventListener("click", () => onSelect("start"));
+  destinationButton.type = "button";
+  destinationButton.textContent = "Set as destination";
+  destinationButton.setAttribute("aria-label", `Set ${accessPoint.name} as destination`);
+  destinationButton.addEventListener("click", () => onSelect("destination"));
+  actions.append(startButton, destinationButton);
+  container.append(name, details, actions);
   return container;
 }
 
-export default function SensoryWayMap({ start, destination, routes, transitAccessPoints, activeRouteId, onRouteSelect }: SensoryWayMapProps) {
+export default function SensoryWayMap({ start, destination, routes, transitAccessPoints, activeRouteId, onRouteSelect, onTransitPointSelect }: SensoryWayMapProps) {
   const mapElementRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const overlaysRef = useRef<MapOverlay[]>([]);
@@ -142,7 +157,10 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
       });
 
       marker.addListener("click", () => {
-        transitInfoRef.current?.setContent(createTransitInfo(accessPoint));
+        transitInfoRef.current?.setContent(createTransitInfo(accessPoint, (field) => {
+          onTransitPointSelect(field, accessPoint);
+          transitInfoRef.current?.close();
+        }));
         transitInfoRef.current?.open({ map, anchor: marker });
       });
       nextOverlays.push(marker);
@@ -180,7 +198,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
     return () => {
       nextOverlays.forEach((overlay) => overlay.setMap(null));
     };
-  }, [activeRouteId, destination, isReady, onRouteSelect, routes, start, transitAccessPoints]);
+  }, [activeRouteId, destination, isReady, onRouteSelect, onTransitPointSelect, routes, start, transitAccessPoints]);
 
   return (
     <>

@@ -255,6 +255,30 @@ export default function HomePage() {
     setLocationSearchError(null);
   }
 
+  function selectTransitPoint(field: SearchField, accessPoint: TransitAccessPoint) {
+    const place: Place = {
+      label: accessPoint.name,
+      detail: `${accessPoint.mode} stop`,
+      longitude: accessPoint.longitude,
+      latitude: accessPoint.latitude,
+    };
+
+    if (field === "start") {
+      setStartLabel(place.label);
+      setResolvedStart(place);
+    } else {
+      setDestinationLabel(place.label);
+      setResolvedDestination(place);
+    }
+    setLocationSearchField(null);
+    setLocationSuggestions([]);
+    setLocationSearchError(null);
+    setError(null);
+    setResult(null);
+    setActiveRouteId(null);
+    setNearbyTransit({ start: [], destination: [] });
+  }
+
   async function planRoute(event?: FormEvent) {
     event?.preventDefault();
 
@@ -334,7 +358,7 @@ export default function HomePage() {
       </nav>
 
       <section className="map-stage" aria-label="Route planner">
-        <SensoryWayMap start={start} destination={destination} routes={result?.routes ?? []} transitAccessPoints={transitAccessPoints} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} />
+        <SensoryWayMap start={start} destination={destination} routes={result?.routes ?? []} transitAccessPoints={transitAccessPoints} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} onTransitPointSelect={selectTransitPoint} />
 
         <aside className="map-sidebar" aria-label="SensoryWay workspace">
           {activeView === "explore" ? <>
