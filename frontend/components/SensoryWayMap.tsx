@@ -66,6 +66,18 @@ function segmentColour(crowdLevel: "low" | "medium" | "high") {
   return { low: "#188038", medium: "#f9ab00", high: "#d93025" }[crowdLevel];
 }
 
+function segmentOutlineColour(crowdLevel: "low" | "medium" | "high") {
+  return { low: "#0b5c31", medium: "#a66300", high: "#a71c18" }[crowdLevel];
+}
+
+function routeOutlineColour(route: MapRoute, activeRouteId: number | null) {
+  if (route.crowd_segments.length > 0) return "#1a4f9c";
+  if (route.route_id === activeRouteId || route.recommended) return "#0b6e39";
+  if (route.crowd_level === "high") return "#9f251f";
+  if (route.crowd_level === "medium") return "#9b5900";
+  return "#1a4f9c";
+}
+
 function transitColour(mode: TransitAccessPoint["mode"]) {
   return { bus: "#7e3af2", tram: "#d63384", train: "#1769e0", coach: "#7c5d20" }[mode];
 }
@@ -178,29 +190,66 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
 
     routes.forEach((route) => {
       const isActive = route.route_id === activeRouteId;
+      const path = route.coordinates.map(pointToLatLng);
+      const routeFill = route.crowd_segments.length > 0 ? "#4285f4" : routeColour(route, activeRouteId);
+      const baseOpacity = isActive ? 1 : 0.6;
+      const baseWeight = isActive ? 6 : 4;
+
+      // A light halo and dark outline keep routes readable over detailed map tiles.
+      const routeHalo = new google.maps.Polyline({
+        map,
+        path,
+        strokeColor: "#ffffff",
+        strokeOpacity: isActive ? 0.92 : 0.64,
+        strokeWeight: baseWeight + 6,
+        zIndex: isActive ? 3 : 1,
+      });
+      const routeOutline = new google.maps.Polyline({
+        map,
+        path,
+        strokeColor: routeOutlineColour(route, activeRouteId),
+        strokeOpacity: baseOpacity,
+        strokeWeight: baseWeight + 3,
+        zIndex: isActive ? 4 : 2,
+      });
       const polyline = new google.maps.Polyline({
         map,
-        path: route.coordinates.map(pointToLatLng),
-        strokeColor: route.crowd_segments.length > 0 ? "#2d6cdf" : routeColour(route, activeRouteId),
-        strokeOpacity: isActive ? 1 : 0.48,
-        strokeWeight: isActive ? 7 : 5,
-        zIndex: isActive ? 6 : 4,
+        path,
+        strokeColor: routeFill,
+        strokeOpacity: baseOpacity,
+        strokeWeight: baseWeight,
+        zIndex: isActive ? 5 : 3,
       });
-      polyline.addListener("click", () => onRouteSelect(route.route_id));
-      nextOverlays.push(polyline);
+      [routeHalo, routeOutline, polyline].forEach((overlay) => {
+        overlay.addListener("click", () => onRouteSelect(route.route_id));
+        nextOverlays.push(overlay);
+      });
 
       route.crowd_segments.forEach((segment) => {
         if (!segment.crowd_level) return;
+        const segmentWeight = isActive ? 6 : 4;
+        const segmentOpacity = isActive ? 1 : 0.78;
+        const segmentPath = segment.coordinates.map(pointToLatLng);
+        const segmentOutline = new google.maps.Polyline({
+          map,
+          path: segmentPath,
+          strokeColor: segmentOutlineColour(segment.crowd_level),
+          strokeOpacity: segmentOpacity,
+          strokeWeight: segmentWeight + 3,
+          zIndex: isActive ? 6 : 4,
+        });
         const segmentPolyline = new google.maps.Polyline({
           map,
-          path: segment.coordinates.map(pointToLatLng),
+          path: segmentPath,
           strokeColor: segmentColour(segment.crowd_level),
-          strokeOpacity: isActive ? 1 : 0.68,
-          strokeWeight: isActive ? 7 : 5,
-          zIndex: isActive ? 8 : 5,
+          strokeOpacity: segmentOpacity,
+          strokeWeight: segmentWeight,
+          zIndex: isActive ? 7 : 5,
         });
-        segmentPolyline.addListener("click", () => onRouteSelect(route.route_id));
-        nextOverlays.push(segmentPolyline);
+        [segmentOutline, segmentPolyline].forEach((overlay) => {
+          overlay.addListener("click", () => onRouteSelect(route.route_id));
+          nextOverlays.push(overlay);
+        });
       });
     });
 
