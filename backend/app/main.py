@@ -90,6 +90,7 @@ def score_coordinates(
             status="unavailable",
             crowd_level=None,
             crowd_score=None,
+            data_coverage_confidence=None,
             matched_sensor_count=0,
             latest_data_at=None,
             warning="No pedestrian sensor data is available.",
@@ -104,6 +105,7 @@ def score_coordinates(
             status="stale",
             crowd_level=None,
             crowd_score=None,
+            data_coverage_confidence=None,
             matched_sensor_count=0,
             latest_data_at=latest_data_at,
             warning="Pedestrian data is outdated, so no route crowd score is shown.",
@@ -132,6 +134,7 @@ def score_coordinates(
             status="unavailable",
             crowd_level=None,
             crowd_score=None,
+            data_coverage_confidence=score.data_coverage_confidence,
             matched_sensor_count=0,
             latest_data_at=latest_data_at,
             warning="No pedestrian sensors cover this route.",
@@ -149,6 +152,7 @@ def score_coordinates(
         status="available",
         crowd_level=score.crowd_level,
         crowd_score=score.crowd_score,
+        data_coverage_confidence=score.data_coverage_confidence,
         matched_sensor_count=score.matched_sensor_count,
         latest_data_at=latest_data_at,
         warning=None,
@@ -322,6 +326,8 @@ def routes(
     request: RoutesRequest,
     connection: psycopg.Connection[Any] = Depends(get_db),
 ) -> RoutesResponse:
+    minimum_recommendation_coverage = 50.0
+
     if not is_in_melbourne_cbd(request.destination.longitude, request.destination.latitude):
         raise HTTPException(status_code=422, detail="The onboarding MVP currently supports destinations within Melbourne CBD.")
 
@@ -356,6 +362,7 @@ def routes(
                 data_status=crowd.status,
                 crowd_level=crowd.crowd_level,
                 crowd_score=crowd.crowd_score,
+                data_coverage_confidence=crowd.data_coverage_confidence,
                 matched_sensor_count=crowd.matched_sensor_count,
                 latest_data_at=crowd.latest_data_at,
                 crowd_segments=crowd.crowd_segments,
@@ -367,8 +374,14 @@ def routes(
 
     eligible_options = [option for option in options if option.meets_crowd_threshold]
     if eligible_options:
+        highly_covered_options = [
+            option
+            for option in eligible_options
+            if option.data_coverage_confidence is not None and option.data_coverage_confidence > minimum_recommendation_coverage
+        ]
+        recommendation_pool = highly_covered_options or eligible_options
         selected = min(
-            eligible_options,
+            recommendation_pool,
             key=lambda option: (route_limit(option.crowd_level or "high"), option.duration_seconds),
         )
         selected.recommended = True

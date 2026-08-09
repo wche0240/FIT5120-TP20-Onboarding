@@ -42,6 +42,7 @@ type ApiRoute = MapRoute & {
   duration_seconds: number;
   data_status: "available" | "stale" | "unavailable";
   crowd_score: number | null;
+  data_coverage_confidence: number | null;
   matched_sensor_count: number;
   meets_crowd_threshold: boolean | null;
   warning: string | null;
@@ -119,6 +120,22 @@ function routeLabel(route: ApiRoute) {
   if (route.crowd_level === "medium") return "Moderate crowd";
   if (route.crowd_level === "high") return "Very crowded";
   return "Crowd data unavailable";
+}
+
+function confidenceLabel(route: ApiRoute) {
+  if (route.data_coverage_confidence === null || route.data_coverage_confidence === undefined) {
+    return "Coverage N/A";
+  }
+  return `Coverage ${route.data_coverage_confidence.toFixed(1)}%`;
+}
+
+function confidenceTone(route: ApiRoute) {
+  if (route.data_status !== "available" || route.data_coverage_confidence === null || route.data_coverage_confidence === undefined) {
+    return "unknown";
+  }
+  if (route.data_coverage_confidence >= 70) return "high";
+  if (route.data_coverage_confidence >= 40) return "medium";
+  return "low";
 }
 
 export default function HomePage() {
@@ -453,11 +470,15 @@ export default function HomePage() {
                       <strong>Route {route.route_id} - {routeLabel(route)}</strong>
                       <span>{formatDistance(route.distance_metres)} · {formatDuration(route.duration_seconds)}</span>
                     </span>
+                    <span className={`coverage-chip ${confidenceTone(route)}`}>{confidenceLabel(route)}</span>
                     {route.recommended ? <span className="recommended-mark"><ShieldCheck size={17} />Recommended</span> : <ChevronRight size={19} aria-hidden="true" />}
                   </button>
                 ))}
               </div>
               <p className="route-detail">Destination: {destination.label}.</p>
+              <p className="route-detail">
+                Data Coverage Confidence: {activeRoute?.data_coverage_confidence !== null && activeRoute?.data_coverage_confidence !== undefined ? `${activeRoute.data_coverage_confidence.toFixed(1)}%` : "N/A"}. Based on fresh nearby sensor coverage across total route distance.
+              </p>
               {activeRoute?.crowd_score !== null && activeRoute?.crowd_score !== undefined ? <p className="route-detail">Peak nearby reading: {activeRoute.crowd_score} pedestrians per minute across {activeRoute.matched_sensor_count} nearby sensors.</p> : <p className="route-detail">Crowd levels are hidden until the latest official pedestrian data is within the 45-minute freshness window.</p>}
               {result.status === "available" && result.routes.some((route) => route.crowd_segments.length > 0) ? <p className="route-detail">Map colours show recent sensor coverage on every route: green low, orange medium, red high, and blue where no nearby sensor covers the path. The selected route is shown more strongly.</p> : null}
               {(nearbyTransit.start.length > 0 || nearbyTransit.destination.length > 0) ? (

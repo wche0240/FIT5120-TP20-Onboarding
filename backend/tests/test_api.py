@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.database import get_db
 from app.main import app, crowd_thresholds, stale_after_minutes
 from app.routing import WalkingRoute
+from app.schemas import RouteScoreResponse
 
 
 def mock_connection(row=None, rows=None) -> MagicMock:
@@ -238,6 +239,55 @@ def test_routes_warns_when_no_monitored_route_meets_the_threshold(monkeypatch: p
     assert response.status_code == 200
     assert response.json()["recommended_route_id"] is None
     assert "No currently monitored route" in response.json()["warning"]
+
+
+def test_routes_prioritises_options_with_more_than_50_percent_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ORS_API_KEY", "test-key")
+    provider_routes = [
+        WalkingRoute(coordinates=[(144.9650, -37.8100), (144.9660, -37.8100)], distance_metres=120, duration_seconds=70),
+        WalkingRoute(coordinates=[(144.9650, -37.8110), (144.9660, -37.8110)], distance_metres=130, duration_seconds=80),
+    ]
+    monkeypatch.setattr("app.main.request_walking_routes", lambda **_: provider_routes)
+
+    crowd_scores = iter(
+        [
+            RouteScoreResponse(
+                status="available",
+                crowd_level="low",
+                crowd_score=8,
+                data_coverage_confidence=42.0,
+                matched_sensor_count=2,
+                latest_data_at=datetime.now(timezone.utc),
+                warning=None,
+                crowd_segments=[],
+            ),
+            RouteScoreResponse(
+                status="available",
+                crowd_level="medium",
+                crowd_score=20,
+                data_coverage_confidence=72.0,
+                matched_sensor_count=2,
+                latest_data_at=datetime.now(timezone.utc),
+                warning=None,
+                crowd_segments=[],
+            ),
+        ]
+    )
+    monkeypatch.setattr("app.main.score_coordinates", lambda *_, **__: next(crowd_scores))
+
+    response = client_for(mock_connection(rows=[])).post(
+        "/api/v1/routes",
+        json={
+            "start": {"longitude": 144.9650, "latitude": -37.8100},
+            "destination": {"longitude": 144.9660, "latitude": -37.8100},
+            "max_crowd_level": "medium",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_route_id"] == 2
+    assert body["routes"][1]["recommended"] is True
 
 
 def test_routes_reports_a_configuration_error_without_an_ors_key(monkeypatch: pytest.MonkeyPatch) -> None:

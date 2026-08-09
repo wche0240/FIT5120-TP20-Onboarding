@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, radians, sqrt
+from math import asin, cos, radians, sin, sqrt
 from typing import Iterable
 
 from app.crowd import classify_crowd_level
@@ -22,6 +22,7 @@ class RouteCrowdScore:
     crowd_score: int | None
     crowd_level: str | None
     matched_sensor_count: int
+    data_coverage_confidence: float | None
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,22 @@ def point_to_segment_distance_metres(
     return sqrt((point_x - closest_x) ** 2 + (point_y - closest_y) ** 2)
 
 
+def point_to_point_distance_metres(
+    start_latitude: float,
+    start_longitude: float,
+    end_latitude: float,
+    end_longitude: float,
+) -> float:
+    """Return the great-circle distance between two WGS84 coordinates."""
+    latitude_delta = radians(end_latitude - start_latitude)
+    longitude_delta = radians(end_longitude - start_longitude)
+    haversine = (
+        sin(latitude_delta / 2) ** 2
+        + cos(radians(start_latitude)) * cos(radians(end_latitude)) * sin(longitude_delta / 2) ** 2
+    )
+    return EARTH_RADIUS_METRES * 2 * asin(sqrt(haversine))
+
+
 def score_route(
     coordinates: list[tuple[float, float]],
     readings: Iterable[SensorReading],
@@ -78,10 +95,38 @@ def score_route(
     medium_max: int,
 ) -> RouteCrowdScore:
     """Use the busiest sensor near the route as a transparent, conservative score."""
+    reading_list = list(readings)
     matched_counts: list[int] = []
     route_segments = list(zip(coordinates, coordinates[1:]))
+    segment_lengths = [
+        point_to_point_distance_metres(start_latitude, start_longitude, end_latitude, end_longitude)
+        for (start_longitude, start_latitude), (end_longitude, end_latitude) in route_segments
+    ]
+    total_distance_metres = sum(segment_lengths)
 
-    for reading in readings:
+    if total_distance_metres > 0:
+        covered_distance_metres = sum(
+            segment_length
+            for segment_length, ((start_longitude, start_latitude), (end_longitude, end_latitude)) in zip(
+                segment_lengths, route_segments
+            )
+            if any(
+                point_to_segment_distance_metres(
+                    reading.latitude,
+                    reading.longitude,
+                    start_latitude,
+                    start_longitude,
+                    end_latitude,
+                    end_longitude,
+                ) <= sensor_radius_metres
+                for reading in reading_list
+            )
+        )
+        data_coverage_confidence = round((covered_distance_metres / total_distance_metres) * 100, 1)
+    else:
+        data_coverage_confidence = None
+
+    for reading in reading_list:
         for (start_longitude, start_latitude), (end_longitude, end_latitude) in route_segments:
             distance = point_to_segment_distance_metres(
                 reading.latitude,
@@ -96,13 +141,19 @@ def score_route(
                 break
 
     if not matched_counts:
-        return RouteCrowdScore(crowd_score=None, crowd_level=None, matched_sensor_count=0)
+        return RouteCrowdScore(
+            crowd_score=None,
+            crowd_level=None,
+            matched_sensor_count=0,
+            data_coverage_confidence=data_coverage_confidence,
+        )
 
     crowd_score = max(matched_counts)
     return RouteCrowdScore(
         crowd_score=crowd_score,
         crowd_level=classify_crowd_level(crowd_score, low_max, medium_max),
         matched_sensor_count=len(matched_counts),
+        data_coverage_confidence=data_coverage_confidence,
     )
 
 

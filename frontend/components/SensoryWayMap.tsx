@@ -177,33 +177,49 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
     routes.forEach((route) => {
       const isActive = route.route_id === activeRouteId;
       const path = route.coordinates.map(pointToLatLng);
-      const baseOpacity = isActive ? 1 : 0.6;
-      const baseWeight = isActive ? 6 : 4;
+      const baseOpacity = isActive ? 1 : 0.72;
+      const baseWeight = isActive ? 8 : 4;
 
       // A light halo and dark outline keep routes readable over detailed map tiles.
       const routeHalo = new google.maps.Polyline({
         map,
         path,
-        strokeColor: "#ffffff",
-        strokeOpacity: isActive ? 0.92 : 0.64,
-        strokeWeight: baseWeight + 6,
-        zIndex: isActive ? 3 : 1,
+        strokeColor: isActive ? "#ffffff" : "#e8edf4",
+        strokeOpacity: isActive ? 0.95 : 0.54,
+        strokeWeight: baseWeight + (isActive ? 8 : 3),
+        zIndex: isActive ? 8 : 1,
       });
       const routeOutline = new google.maps.Polyline({
         map,
         path,
-        strokeColor: "#1a4f9c",
-        strokeOpacity: baseOpacity,
+        strokeColor: "#08306b",
+        strokeOpacity: isActive ? 0.95 : 0.38,
         strokeWeight: baseWeight + 3,
-        zIndex: isActive ? 4 : 2,
+        zIndex: isActive ? 9 : 2,
       });
       const polyline = new google.maps.Polyline({
         map,
         path,
-        strokeColor: "#4285f4",
+        strokeColor: "#1b66ff",
         strokeOpacity: baseOpacity,
         strokeWeight: baseWeight,
-        zIndex: isActive ? 5 : 3,
+        zIndex: isActive ? 10 : 3,
+        icons: isActive
+          ? [
+              {
+                icon: {
+                  path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                  scale: 2.5,
+                  fillColor: "#ffffff",
+                  fillOpacity: 0.95,
+                  strokeColor: "#08306b",
+                  strokeWeight: 1.5,
+                },
+                offset: "12%",
+                repeat: "120px",
+              },
+            ]
+          : undefined,
       });
       [routeHalo, routeOutline, polyline].forEach((overlay) => {
         overlay.addListener("click", () => onRouteSelect(route.route_id));
@@ -213,7 +229,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
       route.crowd_segments.forEach((segment) => {
         if (!crowdDataAvailable || !segment.crowd_level) return;
         const segmentWeight = isActive ? 6 : 4;
-        const segmentOpacity = isActive ? 1 : 0.78;
+        const segmentOpacity = isActive ? 0.98 : 0.56;
         const segmentPath = segment.coordinates.map(pointToLatLng);
         const segmentOutline = new google.maps.Polyline({
           map,
@@ -221,7 +237,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
           strokeColor: segmentOutlineColour(segment.crowd_level),
           strokeOpacity: segmentOpacity,
           strokeWeight: segmentWeight + 3,
-          zIndex: isActive ? 6 : 4,
+          zIndex: isActive ? 11 : 4,
         });
         const segmentPolyline = new google.maps.Polyline({
           map,
@@ -229,7 +245,7 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
           strokeColor: segmentColour(segment.crowd_level),
           strokeOpacity: segmentOpacity,
           strokeWeight: segmentWeight,
-          zIndex: isActive ? 7 : 5,
+          zIndex: isActive ? 12 : 5,
         });
         [segmentOutline, segmentPolyline].forEach((overlay) => {
           overlay.addListener("click", () => onRouteSelect(route.route_id));

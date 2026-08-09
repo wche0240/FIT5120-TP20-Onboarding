@@ -59,6 +59,7 @@ class RouteScoreResponse(BaseModel):
     status: Literal["available", "stale", "unavailable"]
     crowd_level: Literal["low", "medium", "high"] | None
     crowd_score: int | None
+    data_coverage_confidence: float | None = Field(default=None, ge=0, le=100)
     matched_sensor_count: int
     latest_data_at: datetime | None
     warning: str | None
@@ -90,6 +91,7 @@ class RouteOption(BaseModel):
     data_status: Literal["available", "stale", "unavailable"]
     crowd_level: CrowdLevel | None
     crowd_score: int | None
+    data_coverage_confidence: float | None = Field(default=None, ge=0, le=100)
     matched_sensor_count: int
     latest_data_at: datetime | None
     crowd_segments: list[RouteCrowdSegment] = Field(default_factory=list)
