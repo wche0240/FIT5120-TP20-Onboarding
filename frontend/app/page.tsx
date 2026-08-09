@@ -433,7 +433,7 @@ export default function HomePage() {
               <button
                 key={option.value}
                 type="button"
-                className={crowdLevel === option.value ? "level-option selected" : "level-option"}
+                className={crowdLevel === option.value ? `level-option level-${option.value} selected` : `level-option level-${option.value}`}
                 onClick={() => setCrowdLevel(option.value)}
                 role="radio"
                 aria-checked={crowdLevel === option.value}
@@ -497,7 +497,7 @@ export default function HomePage() {
         </> : null}
 
         {activeView === "saved" ? <section className="sidebar-view"><div className="view-heading"><Bookmark size={21} /><div><h1>Saved routes</h1><p>{savedRoutes.length ? `${savedRoutes.length} route${savedRoutes.length === 1 ? "" : "s"}` : "No saved routes"}</p></div></div>{savedRoutes.length ? <div className="saved-route-list">{savedRoutes.map((savedRoute) => <div className="saved-route" key={savedRoute.id}><button type="button" onClick={() => restoreSavedRoute(savedRoute)}><strong>{savedRoute.startLabel} to {savedRoute.destinationLabel}</strong><span>{formatDistance(savedRoute.distanceMetres)} 路 {formatDuration(savedRoute.durationSeconds)} · {savedRoute.crowdLevel} preference</span></button><button type="button" className="remove-saved-route" aria-label={`Remove saved route to ${savedRoute.destinationLabel}`} title="Remove saved route" onClick={() => setSavedRoutes((routes) => routes.filter((route) => route.id !== savedRoute.id))}><Trash2 size={17} /></button></div>)}</div> : <div className="empty-state"><Bookmark size={22} /><div><h2>Nothing saved yet</h2><p>Save an active route after planning your walk.</p></div></div>}</section> : null}
-        {activeView === "profile" ? <section className="sidebar-view"><div className="view-heading"><CircleUserRound size={22} /><div><h1>Route settings</h1><p>Stored only in this browser</p></div></div><div className="profile-preference"><h2>Preferred crowd level</h2><div className="level-selector" role="radiogroup" aria-label="Profile crowd preference">{CROWD_OPTIONS.map((option) => <button key={option.value} type="button" className={crowdLevel === option.value ? "level-option selected" : "level-option"} onClick={() => setCrowdLevel(option.value)} role="radio" aria-checked={crowdLevel === option.value}><strong>{option.label}</strong><span>{option.help}</span></button>)}</div></div></section> : null}
+        {activeView === "profile" ? <section className="sidebar-view"><div className="view-heading"><CircleUserRound size={22} /><div><h1>Route settings</h1><p>Stored only in this browser</p></div></div><div className="profile-preference"><h2>Preferred crowd level</h2><div className="level-selector" role="radiogroup" aria-label="Profile crowd preference">{CROWD_OPTIONS.map((option) => <button key={option.value} type="button" className={crowdLevel === option.value ? `level-option level-${option.value} selected` : `level-option level-${option.value}`} onClick={() => setCrowdLevel(option.value)} role="radio" aria-checked={crowdLevel === option.value}><strong>{option.label}</strong><span>{option.help}</span></button>)}</div></div></section> : null}
         </aside>
       </section>
 
