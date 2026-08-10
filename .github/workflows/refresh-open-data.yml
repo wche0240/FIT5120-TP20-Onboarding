@@ -36,6 +36,8 @@ jobs:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           MIGRATIONS_DIR: database/migrations
           PYTHONPATH: backend
+          # GitHub-hosted runners cannot write to the container-only /data mount.
+          DATA_DIR: /tmp/sensoryway-open-data
         run: |
           python -m scripts.migrate
           python -m scripts.ingest_open_data
