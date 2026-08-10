@@ -216,7 +216,12 @@ def trigger_open_data_ingestion(x_etl_token: str | None = Header(default=None)) 
         )
         raise HTTPException(status_code=401, detail="Invalid ETL trigger token.")
 
-    ingest()
+    try:
+        ingest()
+    except Exception as exc:
+        # Keep the scheduler response generic while preserving the traceback in Render logs.
+        logger.exception("Open-data ingestion failed")
+        raise HTTPException(status_code=500, detail="Open-data ingestion failed. Check server logs.") from exc
     return {"status": "completed"}
 
 
