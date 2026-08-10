@@ -33,6 +33,10 @@ CBD_BOUNDS = {"minimum_longitude": 144.94, "maximum_longitude": 144.99, "minimum
 class OpenDataRateLimitError(RuntimeError):
     """Raised when the City of Melbourne rejects an Open Data request due to quota."""
 
+    def __init__(self, message: str, *, reset_time: str | None = None) -> None:
+        super().__init__(message)
+        self.reset_time = reset_time
+
 
 class TLS12HTTPAdapter(HTTPAdapter):
     """Use TLS 1.2 for the City of Melbourne Open Data service."""
@@ -101,7 +105,8 @@ def fetch_records(
                 reset_hint = f" The provider reports that the limit resets at {reset_time}." if reset_time else ""
                 raise OpenDataRateLimitError(
                     "City of Melbourne Open Data daily request limit was reached for "
-                    f"dataset '{dataset}' at offset {offset} (limit {limit}).{reset_hint}"
+                    f"dataset '{dataset}' at offset {offset} (limit {limit}).{reset_hint}",
+                    reset_time=reset_time,
                 )
             response.raise_for_status()
         except requests.RequestException as error:

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from app.etl import (
@@ -8,7 +10,7 @@ from app.etl import (
     OpenDataRateLimitError,
     open_data_session,
 )
-from scripts.run_scheduled_ingest import refresh_interval_seconds
+from scripts.run_scheduled_ingest import rate_limit_delay_seconds, refresh_interval_seconds
 
 
 def test_clean_sensor_locations_removes_duplicate_sensor_ids() -> None:
@@ -158,3 +160,16 @@ def test_scheduler_rejects_a_non_positive_refresh_interval(monkeypatch: pytest.M
     monkeypatch.setenv("ETL_REFRESH_INTERVAL_MINUTES", "0")
     with pytest.raises(ValueError, match="at least 1 minute"):
         refresh_interval_seconds()
+
+
+def test_scheduler_waits_until_provider_quota_reset() -> None:
+    error = OpenDataRateLimitError("quota exhausted", reset_time="2026-08-11T00:00:00Z")
+    current_time = datetime(2026, 8, 10, 23, 45, tzinfo=timezone.utc)
+
+    assert rate_limit_delay_seconds(error, fallback_seconds=15 * 60, now=current_time) == 16 * 60
+
+
+def test_scheduler_uses_normal_interval_without_a_future_quota_reset() -> None:
+    error = OpenDataRateLimitError("quota exhausted", reset_time="invalid")
+
+    assert rate_limit_delay_seconds(error, fallback_seconds=15 * 60) == 15 * 60

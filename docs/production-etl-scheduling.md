@@ -35,7 +35,7 @@ docker-compose logs -f etl-scheduler
 
 City of Melbourne Open Data applies an anonymous request quota. The ingestion process uses 1,000 records per page so a normal minute-count refresh needs only about ten source requests instead of around one hundred. This keeps the scheduled workload well below the quota under normal conditions.
 
-If the provider returns HTTP `429`, SensoryWay records the failed refresh in `data_refresh_log` and exposes its status and error through `/api/v1/data-status`. The local scheduler and GitHub Actions wait for the next scheduled run instead of retrying the quota error immediately. Restarting Docker, Render, or the frontend cannot clear a provider-side quota; the provider must reset it first.
+If the provider returns HTTP `429`, SensoryWay records the failed refresh in `data_refresh_log` and exposes its status and error through `/api/v1/data-status`. When the provider supplies a `reset_time`, the local scheduler pauses until that time plus a one-minute buffer, then resumes automatically. GitHub Actions exits without immediate retries and its next scheduled run resumes normally after the reset. Restarting Docker, Render, or the frontend cannot clear a provider-side quota; the provider must reset it first.
 
 ## Cost and reliability notes
 
