@@ -1,6 +1,6 @@
 import pytest
 
-from app.etl import clean_minute_counts, clean_sensor_locations, clean_transit_access_points
+from app.etl import clean_minute_counts, clean_sensor_locations, clean_transit_access_points, open_data_session
 from scripts.run_scheduled_ingest import refresh_interval_seconds
 
 
@@ -76,6 +76,16 @@ def test_clean_transit_access_points_keeps_supported_cbd_stops() -> None:
         }
     )
     assert rows == [("tram:100", "CBD Tram Stop", "tram", "METRO TRAM", -37.8136, 144.9631)]
+
+
+def test_open_data_session_retries_transient_provider_failures() -> None:
+    session = open_data_session()
+    retries = session.get_adapter("https://").max_retries
+
+    assert retries.total == 4
+    assert retries.connect == 4
+    assert retries.read == 4
+    assert retries.other == 4
 
 
 def test_scheduler_defaults_to_a_fifteen_minute_refresh(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -9,6 +9,8 @@ from typing import Any
 import pandas as pd
 import psycopg
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.crowd import classify_crowd_level
 
@@ -23,6 +25,24 @@ TRANSIT_STOPS_URL = (
 CBD_BOUNDS = {"minimum_longitude": 144.94, "maximum_longitude": 144.99, "minimum_latitude": -37.825, "maximum_latitude": -37.80}
 
 
+def open_data_session() -> requests.Session:
+    """Return a resilient session for external public-data providers."""
+    retries = Retry(
+        total=4,
+        connect=4,
+        read=4,
+        other=4,
+        backoff_factor=1,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("https://", adapter)
+    return session
+
+
 def fetch_records(
     dataset: str, page_size: int, max_records: int, order_by: str | None = None
 ) -> list[dict[str, Any]]:
@@ -30,13 +50,14 @@ def fetch_records(
     records: list[dict[str, Any]] = []
     offset = 0
     url = CATALOGUE_URL.format(dataset=dataset)
+    session = open_data_session()
 
     while len(records) < max_records:
         limit = min(page_size, max_records - len(records))
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if order_by:
             params["order_by"] = order_by
-        response = requests.get(url, params=params, timeout=30)
+        response = session.get(url, params=params, timeout=30)
         response.raise_for_status()
         page = response.json().get("results", [])
         if not page:
@@ -329,7 +350,7 @@ def ingest() -> None:
             completed_refreshes.add(minute_refresh)
 
             try:
-                transit_response = requests.get(TRANSIT_STOPS_URL, timeout=60)
+                transit_response = open_data_session().get(TRANSIT_STOPS_URL, timeout=60)
                 transit_response.raise_for_status()
                 transit_payload = transit_response.json()
                 archive_raw_records(TRANSIT_STOPS_DATASET, transit_payload, data_dir)
