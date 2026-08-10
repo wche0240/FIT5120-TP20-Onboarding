@@ -30,6 +30,12 @@ data/processed/  Cleaned or generated data (not committed)
 
 Project setup in progress.
 
+## Production Deployment
+
+SensoryWay is deployed as separate services: the Next.js frontend on Vercel, and the FastAPI API, PostgreSQL database, and 15-minute one-off ETL Cron Job on Render. Use `backend/Dockerfile.production` with the repository root as the Docker build context. The API health check is `/api/v1/health`; run `python -m scripts.migrate` before starting the API against a new cloud database.
+
+Keep all production credentials in the Vercel or Render environment-variable settings. Do not commit `.env`, `.env.local`, Google Maps keys, ORS keys, or database URLs.
+
 ## Epic 1 Data Layer
 
 The first build stores City of Melbourne sensor locations and minute-level pedestrian counts in PostgreSQL. The ETL process archives the source response, removes duplicate composite keys, validates required fields, converts timestamps to the Melbourne timezone, and records every refresh attempt.
