@@ -122,6 +122,11 @@ def test_fetch_records_stops_before_the_provider_offset_limit(
     assert requested_offsets == [0, 7_500]
 
 
+def test_fetch_records_rejects_an_invalid_page_size() -> None:
+    with pytest.raises(ValueError, match="ETL_PAGE_SIZE must be at least 1"):
+        fetch_records("minute-counts", page_size=0, max_records=100)
+
+
 def test_scheduler_defaults_to_a_fifteen_minute_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ETL_REFRESH_INTERVAL_MINUTES", raising=False)
     assert refresh_interval_seconds() == 15 * 60

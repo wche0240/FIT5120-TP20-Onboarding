@@ -18,7 +18,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - name: Trigger the Render production ETL
         env:
@@ -32,18 +32,31 @@ jobs:
 
           # Call the deployed API so the job updates the exact PostgreSQL
           # database that the public website reads from.
-          curl \
-            --fail-with-body \
-            --silent \
-            --show-error \
-            --location \
-            --retry 1 \
-            --retry-all-errors \
-            --retry-delay 10 \
-            --connect-timeout 20 \
-            --max-time 120 \
-            -X POST "${API_BASE_URL}/api/v1/internal/ingest" \
-            -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}"
+          # The City of Melbourne provider can briefly rate-limit requests.
+          # Retry a complete ingestion after a short cooldown so the previous
+          # successful data remains available rather than becoming stale.
+          for attempt in 1 2 3; do
+            echo "Production ingestion attempt ${attempt}/3"
+            if curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 20 \
+              --max-time 150 \
+              -X POST "${API_BASE_URL}/api/v1/internal/ingest" \
+              -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}"; then
+              break
+            fi
+
+            if [ "${attempt}" = "3" ]; then
+              echo "::error::Production ingestion failed after three attempts."
+              exit 1
+            fi
+
+            echo "Waiting 60 seconds before retrying after a provider or service error."
+            sleep 60
+          done
 
           echo
           echo "Latest data timestamp observed by the public API:"

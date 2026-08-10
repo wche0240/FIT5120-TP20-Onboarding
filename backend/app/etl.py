@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import ssl
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from app.crowd import classify_crowd_level
+
+logger = logging.getLogger(__name__)
 
 MINUTE_COUNTS_DATASET = "pedestrian-counting-system-past-hour-counts-per-minute"
 SENSOR_LOCATIONS_DATASET = "pedestrian-counting-system-sensor-locations"
@@ -59,6 +62,11 @@ def fetch_records(
     dataset: str, page_size: int, max_records: int, order_by: str | None = None
 ) -> list[dict[str, Any]]:
     """Fetch a bounded dataset snapshot from the City of Melbourne API."""
+    if page_size < 1:
+        raise ValueError("ETL_PAGE_SIZE must be at least 1.")
+    if max_records < 1:
+        raise ValueError("ETL_MAX_RECORDS must be at least 1.")
+
     records: list[dict[str, Any]] = []
     # The provider rejects requests with an offset of 10,000 or greater.
     snapshot_limit = min(max_records, MAX_OPEN_DATA_RECORDS)
@@ -66,13 +74,27 @@ def fetch_records(
     url = CATALOGUE_URL.format(dataset=dataset)
     session = open_data_session()
 
+    logger.info(
+        "Fetching City of Melbourne dataset '%s' with page size %s (up to %s records).",
+        dataset,
+        page_size,
+        snapshot_limit,
+    )
+
     while len(records) < snapshot_limit:
         limit = min(page_size, snapshot_limit - len(records))
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if order_by:
             params["order_by"] = order_by
-        response = session.get(url, params=params, timeout=30)
-        response.raise_for_status()
+        try:
+            response = session.get(url, params=params, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as error:
+            status_code = getattr(error.response, "status_code", "no response")
+            raise RuntimeError(
+                "City of Melbourne request failed for "
+                f"dataset '{dataset}' at offset {offset} (limit {limit}; status {status_code})."
+            ) from error
         page = response.json().get("results", [])
         if not page:
             break
@@ -81,6 +103,7 @@ def fetch_records(
             break
         offset += len(page)
 
+    logger.info("Fetched %s record(s) from City of Melbourne dataset '%s'.", len(records), dataset)
     return records
 
 
@@ -322,8 +345,11 @@ def upsert_transit_access_points(conn: psycopg.Connection[Any], rows: list[tuple
 def ingest() -> None:
     database_url = os.environ["DATABASE_URL"]
     data_dir = Path(os.getenv("DATA_DIR", "/data"))
-    page_size = int(os.getenv("ETL_PAGE_SIZE", "100"))
-    max_records = int(os.getenv("ETL_MAX_RECORDS", "20000"))
+    # A 1,000-record page needs about ten requests for the bounded minute-count
+    # snapshot instead of about one hundred. This stays within the provider's
+    # offset limit while greatly reducing the chance of a 429 rate-limit error.
+    page_size = int(os.getenv("ETL_PAGE_SIZE", "1000"))
+    max_records = int(os.getenv("ETL_MAX_RECORDS", "10000"))
     low_max = int(os.getenv("CROWD_LOW_MAX", "10"))
     medium_max = int(os.getenv("CROWD_MEDIUM_MAX", "30"))
     city_timezone = os.getenv("CITY_TIMEZONE", "Australia/Melbourne")
