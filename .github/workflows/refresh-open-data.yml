@@ -1,0 +1,35 @@
+name: Refresh Open Data
+
+on:
+  schedule:
+    # Offset from the start of each hour to reduce GitHub Actions scheduler delay.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+# Do not start a second ingestion while the previous refresh is still running.
+concurrency:
+  group: production-open-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: ${{ secrets.ETL_TRIGGER_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger the production ETL
+        env:
+          ETL_ENDPOINT: https://fit5120-tp20-onboarding.onrender.com/api/v1/internal/ingest
+          ETL_TRIGGER_TOKEN: ${{ secrets.ETL_TRIGGER_TOKEN }}
+        run: |
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "X-ETL-Token: ${ETL_TRIGGER_TOKEN}" \
+            --max-time 240 \
+            --retry 2 \
+            --retry-all-errors \
+            --retry-delay 15 \
+            "$ETL_ENDPOINT"
