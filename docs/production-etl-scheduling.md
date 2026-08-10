@@ -8,13 +8,28 @@ The production API exposes `POST /api/v1/internal/ingest` so an external schedul
 
 The repository includes `.github/workflows/refresh-open-data.yml`. It sends a protected `POST` request to the production API at minutes `07`, `22`, `37`, and `52` of each hour (every 15 minutes). The offset avoids the start-of-hour peak where scheduled GitHub Actions jobs are more likely to be delayed.
 
+The workflow deliberately does **not** connect to PostgreSQL directly. It calls the deployed Render API, whose `DATABASE_URL` is the same database used by the website. This prevents a successful scheduler run from accidentally refreshing a different database to the one the public application reads.
+
 Before enabling it:
 
 1. In Render, add `ETL_TRIGGER_TOKEN` to the API Web Service environment variables. Use a long, randomly generated value.
 2. In GitHub, open the repository's **Settings -> Secrets and variables -> Actions**, then add a repository secret with the same name: `ETL_TRIGGER_TOKEN` and exactly the same value.
 3. Open the **Actions** tab, choose **Refresh Open Data**, and use **Run workflow** once to confirm a successful run.
+4. If an older `PRODUCTION_DATABASE_URL` Actions secret was created for the previous workflow design, delete it after the first successful run. It is no longer used.
 
-The workflow uses a 240-second request limit and retries transient network failures. This is important because a Render Free Web Service can take more than 50 seconds to start after inactivity.
+The workflow retries the ingestion request once and allows each request up to 120 seconds. This is important because a Render Free Web Service can take more than 50 seconds to start after inactivity. It then prints `/api/v1/data-status` in the Actions log, providing evidence of the exact source timestamp the public website can see.
+
+## Local development scheduler
+
+The local scheduler only refreshes data while the `etl-scheduler` container is running. Starting only the frontend or only `db` and `api` will not run scheduled ingestion.
+
+```powershell
+docker-compose up -d db api etl-scheduler
+docker-compose ps
+docker-compose logs -f etl-scheduler
+```
+
+`etl-scheduler` runs once immediately, then repeats every `ETL_REFRESH_INTERVAL_MINUTES` (15 minutes by default). It has a restart policy, so Docker restarts it after an unexpected exit. If Docker Desktop itself has been restarted, run the first command again and confirm the scheduler is listed as `running` before relying on automatic updates.
 
 ## Cost and reliability notes
 
@@ -35,6 +50,7 @@ The endpoint returns `503` when the token has not been configured and `401` when
 ## Verification
 
 1. Trigger the workflow once manually from GitHub.
-2. Confirm a successful `200` response in the workflow logs.
-3. Open `https://fit5120-tp20-onboarding.onrender.com/api/v1/data-status` and check that `latest_data_at` is current.
-4. Inspect Render logs if the request fails. The ETL records refresh attempts in the database, so failures remain auditable.
+2. Confirm the workflow log prints `{"status":"completed"}` and then a `data-status` response.
+3. Check that `latest_data_at` in that response matches the most recent official minute-count data available from City of Melbourne Open Data.
+4. Open `https://fit5120-tp20-onboarding.onrender.com/api/v1/data-status` directly if a second check is needed.
+5. Inspect Render logs if the request fails. The ETL records refresh attempts in the database, so failures remain auditable.

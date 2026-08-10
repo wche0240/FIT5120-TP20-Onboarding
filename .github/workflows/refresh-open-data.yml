@@ -6,9 +6,9 @@ on:
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
-# The runner needs a short-lived token to check out this private repository.
-permissions:
-  contents: read
+# This workflow only calls the protected production API; it does not need
+# repository contents or a direct database connection.
+permissions: {}
 
 # Do not start a second ingestion while the previous refresh is still running.
 concurrency:
@@ -20,24 +20,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out the production ETL
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install ETL dependencies
-        run: pip install --disable-pip-version-check -r backend/requirements.txt
-
-      - name: Refresh production open data
+      - name: Trigger the Render production ETL
         env:
-          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
-          MIGRATIONS_DIR: database/migrations
-          PYTHONPATH: backend
-          # GitHub-hosted runners cannot write to the container-only /data mount.
-          DATA_DIR: /tmp/sensoryway-open-data
+          API_BASE_URL: https://fit5120-tp20-onboarding.onrender.com
+          ETL_TRIGGER_TOKEN: ${{ secrets.ETL_TRIGGER_TOKEN }}
         run: |
-          python -m scripts.migrate
-          python -m scripts.ingest_open_data
+          if [ -z "$ETL_TRIGGER_TOKEN" ]; then
+            echo "::error::GitHub Actions secret ETL_TRIGGER_TOKEN is missing."
+            exit 1
+          fi
+
+          # Call the deployed API so the job updates the exact PostgreSQL
+          # database that the public website reads from.
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --location \
+            --retry 1 \
+            --retry-all-errors \
+            --retry-delay 10 \
+            --connect-timeout 20 \
+            --max-time 120 \
+            -X POST "${API_BASE_URL}/api/v1/internal/ingest" \
+            -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}"
+
+          echo
+          echo "Latest data timestamp observed by the public API:"
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --location \
+            --max-time 30 \
+            "${API_BASE_URL}/api/v1/data-status"
+          echo
