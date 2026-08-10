@@ -32,21 +32,36 @@ jobs:
 
           # Call the deployed API so the job updates the exact PostgreSQL
           # database that the public website reads from.
-          # The City of Melbourne provider can briefly rate-limit requests.
-          # Retry a complete ingestion after a short cooldown so the previous
-          # successful data remains available rather than becoming stale.
+          # Retry temporary service failures, but do not retry a 429 response.
+          # A provider quota limit cannot be resolved by an immediate retry.
           for attempt in 1 2 3; do
             echo "Production ingestion attempt ${attempt}/3"
-            if curl \
-              --fail-with-body \
+            response_file="$(mktemp)"
+            set +e
+            status_code="$(curl \
               --silent \
               --show-error \
               --location \
               --connect-timeout 20 \
               --max-time 150 \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
               -X POST "${API_BASE_URL}/api/v1/internal/ingest" \
-              -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}"; then
+              -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}")"
+            curl_exit=$?
+            set -e
+
+            cat "$response_file"
+            rm -f "$response_file"
+            echo
+
+            if [ "$curl_exit" -eq 0 ] && [ "$status_code" = "200" ]; then
               break
+            fi
+
+            if [ "$status_code" = "429" ]; then
+              echo "::warning::City of Melbourne Open Data rate limit reached; skipping immediate retries."
+              exit 1
             fi
 
             if [ "${attempt}" = "3" ]; then

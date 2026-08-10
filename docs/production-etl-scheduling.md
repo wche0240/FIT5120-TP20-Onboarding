@@ -17,7 +17,7 @@ Before enabling it:
 3. Open the **Actions** tab, choose **Refresh Open Data**, and use **Run workflow** once to confirm a successful run.
 4. If an older `PRODUCTION_DATABASE_URL` Actions secret was created for the previous workflow design, delete it after the first successful run. It is no longer used.
 
-The workflow retries the ingestion request once and allows each request up to 120 seconds. This is important because a Render Free Web Service can take more than 50 seconds to start after inactivity. It then prints `/api/v1/data-status` in the Actions log, providing evidence of the exact source timestamp the public website can see.
+The workflow allows each request up to 120 seconds. This is important because a Render Free Web Service can take more than 50 seconds to start after inactivity. It retries ordinary connection and server errors, but it does not immediately retry an HTTP `429` response from City of Melbourne Open Data because that response means the provider's daily quota has been reached. It then prints `/api/v1/data-status` in the Actions log, providing evidence of the exact source timestamp the public website can see.
 
 ## Local development scheduler
 
@@ -30,6 +30,12 @@ docker-compose logs -f etl-scheduler
 ```
 
 `etl-scheduler` runs once immediately, then repeats every `ETL_REFRESH_INTERVAL_MINUTES` (15 minutes by default). It has a restart policy, so Docker restarts it after an unexpected exit. If Docker Desktop itself has been restarted, run the first command again and confirm the scheduler is listed as `running` before relying on automatic updates.
+
+## Provider request quota
+
+City of Melbourne Open Data applies an anonymous request quota. The ingestion process uses 1,000 records per page so a normal minute-count refresh needs only about ten source requests instead of around one hundred. This keeps the scheduled workload well below the quota under normal conditions.
+
+If the provider returns HTTP `429`, SensoryWay records the failed refresh in `data_refresh_log` and exposes its status and error through `/api/v1/data-status`. The local scheduler and GitHub Actions wait for the next scheduled run instead of retrying the quota error immediately. Restarting Docker, Render, or the frontend cannot clear a provider-side quota; the provider must reset it first.
 
 ## Cost and reliability notes
 

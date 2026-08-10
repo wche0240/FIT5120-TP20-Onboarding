@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
-from app.etl import ingest
+from app.etl import MINUTE_COUNTS_DATASET, OpenDataRateLimitError, ingest
 from app.geocoding import GeocodingError, is_in_melbourne_cbd, search_cbd_locations
 from app.route_scoring import SensorReading, assess_route_segments, score_route
 from app.routing import OpenRouteServiceError, request_walking_routes
@@ -218,6 +218,9 @@ def trigger_open_data_ingestion(x_etl_token: str | None = Header(default=None)) 
 
     try:
         ingest()
+    except OpenDataRateLimitError as exc:
+        logger.warning("Open-data ingestion was rate-limited: %s", exc)
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except Exception as exc:
         # Keep the scheduler response generic while preserving the traceback in Render logs.
         logger.exception("Open-data ingestion failed")
@@ -230,9 +233,26 @@ def data_status(connection: psycopg.Connection[Any] = Depends(get_db)) -> DataSt
     with connection.cursor() as cursor:
         cursor.execute("SELECT MAX(sensing_datetime) AS latest_data_at FROM pedestrian_minute_count")
         latest_row = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT status, started_at, completed_at, error_message
+            FROM data_refresh_log
+            WHERE dataset_name = %s
+            ORDER BY refresh_id DESC
+            LIMIT 1
+            """,
+            (MINUTE_COUNTS_DATASET,),
+        )
+        refresh_row = cursor.fetchone()
 
     limit_minutes = stale_after_minutes()
     latest_data_at = latest_row["latest_data_at"] if latest_row else None
+    refresh_details = {
+        "last_refresh_status": refresh_row["status"] if refresh_row else "unavailable",
+        "last_refresh_started_at": refresh_row["started_at"] if refresh_row else None,
+        "last_refresh_completed_at": refresh_row["completed_at"] if refresh_row else None,
+        "last_refresh_error": refresh_row["error_message"] if refresh_row else None,
+    }
     if latest_data_at is None:
         return DataStatusResponse(
             status="unavailable",
@@ -240,6 +260,7 @@ def data_status(connection: psycopg.Connection[Any] = Depends(get_db)) -> DataSt
             age_minutes=None,
             stale_after_minutes=limit_minutes,
             message="Pedestrian data is unavailable.",
+            **refresh_details,
         )
 
     if latest_data_at.tzinfo is None:
@@ -253,6 +274,7 @@ def data_status(connection: psycopg.Connection[Any] = Depends(get_db)) -> DataSt
         age_minutes=age_minutes,
         stale_after_minutes=limit_minutes,
         message=message,
+        **refresh_details,
     )
 
 

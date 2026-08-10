@@ -30,6 +30,10 @@ TRANSIT_STOPS_URL = (
 CBD_BOUNDS = {"minimum_longitude": 144.94, "maximum_longitude": 144.99, "minimum_latitude": -37.825, "maximum_latitude": -37.80}
 
 
+class OpenDataRateLimitError(RuntimeError):
+    """Raised when the City of Melbourne rejects an Open Data request due to quota."""
+
+
 class TLS12HTTPAdapter(HTTPAdapter):
     """Use TLS 1.2 for the City of Melbourne Open Data service."""
 
@@ -48,7 +52,7 @@ def open_data_session() -> requests.Session:
         read=4,
         other=4,
         backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
+        status_forcelist=(500, 502, 503, 504),
         allowed_methods=frozenset({"GET"}),
         raise_on_status=False,
     )
@@ -88,6 +92,17 @@ def fetch_records(
             params["order_by"] = order_by
         try:
             response = session.get(url, params=params, timeout=30)
+            if response.status_code == 429:
+                try:
+                    reset_time = response.json().get("reset_time")
+                except ValueError:
+                    reset_time = None
+
+                reset_hint = f" The provider reports that the limit resets at {reset_time}." if reset_time else ""
+                raise OpenDataRateLimitError(
+                    "City of Melbourne Open Data daily request limit was reached for "
+                    f"dataset '{dataset}' at offset {offset} (limit {limit}).{reset_hint}"
+                )
             response.raise_for_status()
         except requests.RequestException as error:
             status_code = getattr(error.response, "status_code", "no response")

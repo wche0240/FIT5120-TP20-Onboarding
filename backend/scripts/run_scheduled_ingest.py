@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 
-from app.etl import ingest
+from app.etl import OpenDataRateLimitError, ingest
 
 
 def refresh_interval_seconds() -> int:
@@ -30,6 +30,10 @@ def run_forever(sleep=time.sleep) -> None:
         try:
             ingest()
             print("Scheduled open-data ingestion completed successfully.")
+        except OpenDataRateLimitError as error:
+            # The provider's daily quota cannot be fixed by retrying straight away.
+            # Leave the previous data intact and try again at the next scheduled interval.
+            print(f"Scheduled open-data ingestion was rate-limited; waiting for the next interval: {error}")
         except Exception as error:
             # The ETL writes failed attempts to data_refresh_log before re-raising.
             print(f"Scheduled open-data ingestion failed; will retry: {error}")

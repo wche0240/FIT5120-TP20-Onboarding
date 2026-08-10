@@ -5,6 +5,7 @@ from app.etl import (
     clean_sensor_locations,
     clean_transit_access_points,
     fetch_records,
+    OpenDataRateLimitError,
     open_data_session,
 )
 from scripts.run_scheduled_ingest import refresh_interval_seconds
@@ -92,6 +93,7 @@ def test_open_data_session_retries_transient_provider_failures() -> None:
     assert retries.connect == 4
     assert retries.read == 4
     assert retries.other == 4
+    assert 429 not in retries.status_forcelist
 
 
 def test_fetch_records_stops_before_the_provider_offset_limit(
@@ -102,6 +104,7 @@ def test_fetch_records_stops_before_the_provider_offset_limit(
     class Response:
         def __init__(self, limit: int) -> None:
             self.limit = limit
+            self.status_code = 200
 
         def raise_for_status(self) -> None:
             return None
@@ -120,6 +123,25 @@ def test_fetch_records_stops_before_the_provider_offset_limit(
 
     assert len(records) == 10_000
     assert requested_offsets == [0, 7_500]
+
+
+def test_fetch_records_reports_the_provider_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Response:
+        status_code = 429
+
+        @staticmethod
+        def json() -> dict[str, str]:
+            return {"reset_time": "2026-08-11T00:00:00Z"}
+
+    class Session:
+        @staticmethod
+        def get(_url: str, *, params: dict[str, int], timeout: int) -> Response:
+            return Response()
+
+    monkeypatch.setattr("app.etl.open_data_session", lambda: Session())
+
+    with pytest.raises(OpenDataRateLimitError, match="2026-08-11T00:00:00Z"):
+        fetch_records("minute-counts", page_size=10, max_records=10)
 
 
 def test_fetch_records_rejects_an_invalid_page_size() -> None:
