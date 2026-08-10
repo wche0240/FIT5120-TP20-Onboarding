@@ -19,6 +19,7 @@ MINUTE_COUNTS_DATASET = "pedestrian-counting-system-past-hour-counts-per-minute"
 SENSOR_LOCATIONS_DATASET = "pedestrian-counting-system-sensor-locations"
 TRANSIT_STOPS_DATASET = "victorian-public-transport-stops"
 CATALOGUE_URL = "https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/{dataset}/records"
+MAX_OPEN_DATA_RECORDS = 10_000
 TRANSIT_STOPS_URL = (
     "https://opendata.transport.vic.gov.au/dataset/6d36dfd9-8693-4552-8a03-05eb29a391fd/"
     "resource/a2cba0b0-bddc-4b87-b495-2b6b7013af6e/download/public_transport_stops.geojson"
@@ -59,12 +60,14 @@ def fetch_records(
 ) -> list[dict[str, Any]]:
     """Fetch a bounded dataset snapshot from the City of Melbourne API."""
     records: list[dict[str, Any]] = []
+    # The provider rejects requests with an offset of 10,000 or greater.
+    snapshot_limit = min(max_records, MAX_OPEN_DATA_RECORDS)
     offset = 0
     url = CATALOGUE_URL.format(dataset=dataset)
     session = open_data_session()
 
-    while len(records) < max_records:
-        limit = min(page_size, max_records - len(records))
+    while len(records) < snapshot_limit:
+        limit = min(page_size, snapshot_limit - len(records))
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if order_by:
             params["order_by"] = order_by

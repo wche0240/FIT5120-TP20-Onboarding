@@ -1,6 +1,12 @@
 import pytest
 
-from app.etl import clean_minute_counts, clean_sensor_locations, clean_transit_access_points, open_data_session
+from app.etl import (
+    clean_minute_counts,
+    clean_sensor_locations,
+    clean_transit_access_points,
+    fetch_records,
+    open_data_session,
+)
 from scripts.run_scheduled_ingest import refresh_interval_seconds
 
 
@@ -86,6 +92,34 @@ def test_open_data_session_retries_transient_provider_failures() -> None:
     assert retries.connect == 4
     assert retries.read == 4
     assert retries.other == 4
+
+
+def test_fetch_records_stops_before_the_provider_offset_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_offsets: list[int] = []
+
+    class Response:
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, list[dict[str, int]]]:
+            return {"results": [{"row": index} for index in range(self.limit)]}
+
+    class Session:
+        def get(self, _url: str, *, params: dict[str, int], timeout: int) -> Response:
+            requested_offsets.append(params["offset"])
+            return Response(params["limit"])
+
+    monkeypatch.setattr("app.etl.open_data_session", lambda: Session())
+
+    records = fetch_records("minute-counts", page_size=7_500, max_records=20_000)
+
+    assert len(records) == 10_000
+    assert requested_offsets == [0, 7_500]
 
 
 def test_scheduler_defaults_to_a_fifteen_minute_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
