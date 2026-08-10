@@ -15,21 +15,12 @@ concurrency:
 
 jobs:
   refresh:
-    if: ${{ secrets.ETL_TRIGGER_TOKEN != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
       - name: Trigger the production ETL
         env:
           ETL_ENDPOINT: https://fit5120-tp20-onboarding.onrender.com/api/v1/internal/ingest
           ETL_TRIGGER_TOKEN: ${{ secrets.ETL_TRIGGER_TOKEN }}
         run: |
-          curl --fail --show-error --silent \
-            --request POST \
-            --header "X-ETL-Token: ${ETL_TRIGGER_TOKEN}" \
-            --max-time 240 \
-            --retry 2 \
-            --retry-all-errors \
-            --retry-delay 15 \
-            "$ETL_ENDPOINT"
+          curl --fail --show-error --silent --request POST --header "X-ETL-Token: ${ETL_TRIGGER_TOKEN}" --max-time 240 --retry 2 --retry-all-errors --retry-delay 15 "$ETL_ENDPOINT"
