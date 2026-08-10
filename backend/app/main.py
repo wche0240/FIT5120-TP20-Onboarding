@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import hmac
 import os
 from datetime import datetime, timezone
 from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
+from app.etl import ingest
 from app.geocoding import GeocodingError, is_in_melbourne_cbd, search_cbd_locations
 from app.route_scoring import SensorReading, assess_route_segments, score_route
 from app.routing import OpenRouteServiceError, request_walking_routes
@@ -191,6 +193,19 @@ def health(connection: psycopg.Connection[Any] = Depends(get_db)) -> HealthRespo
         cursor.execute("SELECT 1 AS ok")
         cursor.fetchone()
     return HealthResponse(status="ok", database="connected")
+
+
+@app.post("/api/v1/internal/ingest")
+def trigger_open_data_ingestion(x_etl_token: str | None = Header(default=None)) -> dict[str, str]:
+    """Run one protected Open Data refresh for an external scheduler."""
+    expected_token = os.getenv("ETL_TRIGGER_TOKEN", "").strip()
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="ETL trigger is not configured on this server.")
+    if not hmac.compare_digest(expected_token, x_etl_token or ""):
+        raise HTTPException(status_code=401, detail="Invalid ETL trigger token.")
+
+    ingest()
+    return {"status": "completed"}
 
 
 @app.get("/api/v1/data-status", response_model=DataStatusResponse)

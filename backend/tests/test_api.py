@@ -39,6 +39,36 @@ def test_health_confirms_database_connection() -> None:
     assert response.json() == {"status": "ok", "database": "connected"}
 
 
+def test_etl_trigger_rejects_requests_without_a_configured_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ETL_TRIGGER_TOKEN", raising=False)
+
+    response = TestClient(app).post("/api/v1/internal/ingest")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ETL trigger is not configured on this server."
+
+
+def test_etl_trigger_requires_a_matching_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "incorrect"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid ETL trigger token."
+
+
+def test_etl_trigger_runs_ingestion_with_a_matching_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+    monkeypatch.setattr("app.main.ingest", lambda: calls.append(True))
+
+    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "test-trigger-token"})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed"}
+    assert calls == [True]
+
+
 def test_profiled_crowd_thresholds_are_the_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CROWD_LOW_MAX", raising=False)
     monkeypatch.delenv("CROWD_MEDIUM_MAX", raising=False)
