@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,16 @@ TRANSIT_STOPS_URL = (
 CBD_BOUNDS = {"minimum_longitude": 144.94, "maximum_longitude": 144.99, "minimum_latitude": -37.825, "maximum_latitude": -37.80}
 
 
+class TLS12HTTPAdapter(HTTPAdapter):
+    """Use TLS 1.2 for the City of Melbourne Open Data service."""
+
+    def init_poolmanager(self, connections: int, maxsize: int, block: bool = False, **pool_kwargs: Any) -> None:
+        context = ssl.create_default_context()
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        pool_kwargs["ssl_context"] = context
+        super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+
 def open_data_session() -> requests.Session:
     """Return a resilient session for external public-data providers."""
     retries = Retry(
@@ -38,7 +49,7 @@ def open_data_session() -> requests.Session:
         raise_on_status=False,
     )
     session = requests.Session()
-    adapter = HTTPAdapter(max_retries=retries)
+    adapter = TLS12HTTPAdapter(max_retries=retries)
     session.mount("https://", adapter)
     return session
 
