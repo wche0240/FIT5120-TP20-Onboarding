@@ -6,7 +6,9 @@ on:
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
-permissions: {}
+# The runner needs a short-lived token to check out this private repository.
+permissions:
+  contents: read
 
 # Do not start a second ingestion while the previous refresh is still running.
 concurrency:
