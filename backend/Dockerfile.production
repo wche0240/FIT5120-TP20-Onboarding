@@ -14,5 +14,6 @@ COPY backend/app ./app
 COPY backend/scripts ./scripts
 COPY database/migrations /migrations
 
-# The Render Cron Job uses this one-off ETL command. The API service overrides it.
-CMD ["python", "-m", "scripts.ingest_open_data"]
+# A Render Web Service must serve the API by default. A separate Cron Job explicitly
+# overrides this command with `python -m scripts.ingest_open_data --scope minute`.
+CMD ["python", "-m", "scripts.start_api"]

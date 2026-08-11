@@ -3,14 +3,19 @@ from datetime import datetime, timezone
 import pytest
 
 from app.etl import (
+    ETL_SCOPE_MINUTE,
     clean_minute_counts,
     clean_sensor_locations,
     clean_transit_access_points,
+    fetch_export_records,
     fetch_records,
     OpenDataRateLimitError,
     open_data_session,
+    parse_export_records,
+    reference_refresh_due,
+    validate_scope,
 )
-from scripts.run_scheduled_ingest import rate_limit_delay_seconds, refresh_interval_seconds
+from scripts.run_scheduled_ingest import rate_limit_delay_seconds, refresh_interval_seconds, scheduled_scope
 
 
 def test_clean_sensor_locations_removes_duplicate_sensor_ids() -> None:
@@ -121,10 +126,10 @@ def test_fetch_records_stops_before_the_provider_offset_limit(
 
     monkeypatch.setattr("app.etl.open_data_session", lambda: Session())
 
-    records = fetch_records("minute-counts", page_size=7_500, max_records=20_000)
+    records = fetch_records("minute-counts", page_size=100, max_records=250)
 
-    assert len(records) == 10_000
-    assert requested_offsets == [0, 7_500]
+    assert len(records) == 250
+    assert requested_offsets == [0, 100, 200]
 
 
 def test_fetch_records_reports_the_provider_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,8 +152,86 @@ def test_fetch_records_reports_the_provider_rate_limit(monkeypatch: pytest.Monke
 
 
 def test_fetch_records_rejects_an_invalid_page_size() -> None:
-    with pytest.raises(ValueError, match="ETL_PAGE_SIZE must be at least 1"):
+    with pytest.raises(ValueError, match="between 1 and 100"):
         fetch_records("minute-counts", page_size=0, max_records=100)
+    with pytest.raises(ValueError, match="between 1 and 100"):
+        fetch_records("minute-counts", page_size=101, max_records=100)
+
+
+def test_parse_export_records_supports_a_raw_json_list() -> None:
+    assert parse_export_records([{"location_id": 1}], "minute-counts") == [{"location_id": 1}]
+
+
+def test_parse_export_records_supports_a_results_wrapper() -> None:
+    assert parse_export_records({"results": [{"location_id": 1}]}, "minute-counts") == [{"location_id": 1}]
+
+
+def test_parse_export_records_rejects_an_unknown_shape() -> None:
+    with pytest.raises(RuntimeError, match="unsupported response shape"):
+        parse_export_records({"items": [{"location_id": 1}]}, "minute-counts")
+
+
+def test_fetch_export_records_uses_the_export_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    requested: list[tuple[str, dict[str, str], int]] = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+        @staticmethod
+        def json() -> list[dict[str, int]]:
+            return [{"location_id": 1}]
+
+    class Session:
+        @staticmethod
+        def get(url: str, *, params: dict[str, str], timeout: int) -> Response:
+            requested.append((url, params, timeout))
+            return Response()
+
+    monkeypatch.setattr("app.etl.open_data_session", lambda: Session())
+
+    assert fetch_export_records("minute-counts", order_by="sensing_datetime desc") == [{"location_id": 1}]
+    assert requested == [
+        (
+            "https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/minute-counts/exports/json",
+            {"order_by": "sensing_datetime desc"},
+            90,
+        )
+    ]
+
+
+def test_validate_scope_rejects_unrecognised_scopes() -> None:
+    assert validate_scope(ETL_SCOPE_MINUTE) == ETL_SCOPE_MINUTE
+    with pytest.raises(ValueError, match="ETL scope"):
+        validate_scope("everything")
+
+
+def test_reference_refresh_is_due_when_a_static_source_is_missing() -> None:
+    class DatabaseCursor:
+        @staticmethod
+        def execute(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        @staticmethod
+        def fetchone() -> tuple[int]:
+            return (1,)
+
+    class CursorContext:
+        def __enter__(self) -> DatabaseCursor:
+            return DatabaseCursor()
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class Connection:
+        @staticmethod
+        def cursor() -> CursorContext:
+            return CursorContext()
+
+    assert reference_refresh_due(Connection(), interval_hours=24) is True
 
 
 def test_scheduler_defaults_to_a_fifteen_minute_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -173,3 +256,9 @@ def test_scheduler_uses_normal_interval_without_a_future_quota_reset() -> None:
     error = OpenDataRateLimitError("quota exhausted", reset_time="invalid")
 
     assert rate_limit_delay_seconds(error, fallback_seconds=15 * 60) == 15 * 60
+
+
+def test_scheduler_defaults_to_the_minute_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ETL_SCOPE", raising=False)
+
+    assert scheduled_scope() == ETL_SCOPE_MINUTE

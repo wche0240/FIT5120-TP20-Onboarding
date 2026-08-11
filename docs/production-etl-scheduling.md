@@ -1,62 +1,86 @@
 # Production ETL Scheduling
 
-## Purpose
+## Target design
 
-The production API exposes `POST /api/v1/internal/ingest` so an external scheduler can refresh City of Melbourne Open Data without a paid Render Cron Job. The endpoint runs the existing sensor, minute-count and public-transport ETL against the Render PostgreSQL database.
+Use one Render PostgreSQL database, one Render Web Service for the FastAPI API, and one paid Render Cron Job for ingestion. The Cron Job opens Render's internal `DATABASE_URL`, writes to the same database as the API, then exits. It does not call the public API and it does not need `ETL_TRIGGER_TOKEN`.
 
-## Recommended zero-cost scheduler: GitHub Actions
+| Scope | What it refreshes | When it runs |
+| --- | --- | --- |
+| `minute` | Pedestrian counts from the official past-hour feed | Every 15 minutes |
+| reference refresh within `minute` | Sensor locations and public-transport stops | First run and then at most once every 24 hours |
+| `reference` | Sensor locations and public-transport stops only | Manual recovery only |
+| `all` | Both reference data and minute counts | Manual bootstrap/recovery only |
 
-The repository includes `.github/workflows/refresh-open-data.yml`. It sends a protected `POST` request to the production API at minutes `07`, `22`, `37`, and `52` of each hour (every 15 minutes). The offset avoids the start-of-hour peak where scheduled GitHub Actions jobs are more likely to be delayed.
+The official pedestrian feed itself is refreshed roughly every 15 minutes. A 15-minute Cron schedule keeps SensoryWay close to the source; it cannot make the source update more frequently than that.
 
-The workflow deliberately does **not** connect to PostgreSQL directly. It calls the deployed Render API, whose `DATABASE_URL` is the same database used by the website. This prevents a successful scheduler run from accidentally refreshing a different database to the one the public application reads.
+## Required Render configuration
 
-Before enabling it:
+### Web Service
 
-1. In Render, add `ETL_TRIGGER_TOKEN` to the API Web Service environment variables. Use a long, randomly generated value.
-2. In GitHub, open the repository's **Settings -> Secrets and variables -> Actions**, then add a repository secret with the same name: `ETL_TRIGGER_TOKEN` and exactly the same value.
-3. Open the **Actions** tab, choose **Refresh Open Data**, and use **Run workflow** once to confirm a successful run.
-4. If an older `PRODUCTION_DATABASE_URL` Actions secret was created for the previous workflow design, delete it after the first successful run. It is no longer used.
+Keep the API service configured with:
 
-The workflow allows each request up to 120 seconds. This is important because a Render Free Web Service can take more than 50 seconds to start after inactivity. It retries ordinary connection and server errors, but it does not immediately retry an HTTP `429` response from City of Melbourne Open Data because that response means the provider's daily quota has been reached. It then prints `/api/v1/data-status` in the Actions log, providing evidence of the exact source timestamp the public website can see.
+- Build context: repository root
+- Dockerfile path: `backend/Dockerfile.production`
+- Health check: `/api/v1/health`
 
-## Local development scheduler
+Its default command runs `python -m scripts.start_api`, which applies SQL migrations before starting FastAPI. The `003_refresh_log_rate_limited.sql` migration extends the refresh log so rate-limited attempts are visible through `/api/v1/data-status`.
 
-The local scheduler only refreshes data while the `etl-scheduler` container is running. Starting only the frontend or only `db` and `api` will not run scheduled ingestion.
+Set these API environment variables:
 
-```powershell
-docker-compose up -d db api etl-scheduler
-docker-compose ps
-docker-compose logs -f etl-scheduler
+```text
+DATABASE_URL=<Render Postgres internal URL>
+CORS_ORIGINS=<exact deployed frontend origin>
+DATA_STALE_AFTER_MINUTES=45
+ETL_TRIGGER_TOKEN=<long random secret, only for manual API recovery>
 ```
 
-`etl-scheduler` runs once immediately, then repeats every `ETL_REFRESH_INTERVAL_MINUTES` (15 minutes by default). It has a restart policy, so Docker restarts it after an unexpected exit. If Docker Desktop itself has been restarted, run the first command again and confirm the scheduler is listed as `running` before relying on automatic updates.
+The frontend must be rebuilt with `NEXT_PUBLIC_API_BASE_URL` equal to the deployed API origin. A browser fallback to `localhost` is only suitable for local development.
 
-## Provider request quota
+### Cron Job
 
-City of Melbourne Open Data applies an anonymous request quota. The ingestion process uses 1,000 records per page so a normal minute-count refresh needs only about ten source requests instead of around one hundred. This keeps the scheduled workload well below the quota under normal conditions.
+Create one Docker-based Render Cron Job from the same repository:
 
-If the provider returns HTTP `429`, SensoryWay records the failed refresh in `data_refresh_log` and exposes its status and error through `/api/v1/data-status`. When the provider supplies a `reset_time`, the local scheduler pauses until that time plus a one-minute buffer, then resumes automatically. GitHub Actions exits without immediate retries and its next scheduled run resumes normally after the reset. Restarting Docker, Render, or the frontend cannot clear a provider-side quota; the provider must reset it first.
+```text
+Build context:      repository root
+Dockerfile path:    backend/Dockerfile.production
+Command:            python -m scripts.ingest_open_data --scope minute
+Schedule (UTC):     */15 * * * *
+```
 
-## Cost and reliability notes
+Give the Cron Job the following environment variables. Cron Jobs do not automatically inherit a Web Service's variables, so use a Render Environment Group for shared non-secret settings where possible.
 
-- Standard GitHub-hosted Actions runners are free for public repositories. If this repository stays private, GitHub Free includes 2,000 Actions minutes per month. A 15-minute schedule may exceed that private-repository allowance, so do not rely on it as a permanently free private-repository scheduler.
-- Scheduled GitHub Actions can occasionally be delayed, especially at the start of an hour. This build does not claim real-time or guaranteed-on-the-minute updates; it records the actual latest source timestamp and labels data as stale when it is older than the configured freshness window.
-- Public repositories can have scheduled workflows disabled after 60 days without repository activity. A new commit or manually enabling the workflow restores it.
+```text
+DATABASE_URL=<the same Render Postgres internal URL>
+CITY_TIMEZONE=Australia/Melbourne
+CROWD_LOW_MAX=10
+CROWD_MEDIUM_MAX=30
+MINUTE_LOOKBACK_MINUTES=60
+MINUTE_RETENTION_MINUTES=90
+REFERENCE_REFRESH_INTERVAL_HOURS=24
+ARCHIVE_RAW_RECORDS=false
+CITY_OPEN_DATA_API_KEY=<optional Huwise/OpenDataSoft API key>
+```
 
-## Why not cron-job.org for this deployment?
+`ARCHIVE_RAW_RECORDS=false` is intentional: Render Cron Job filesystems are ephemeral, while the cleaned records and refresh audit log are stored in PostgreSQL. Add `CITY_OPEN_DATA_API_KEY` only if the City of Melbourne data platform has issued one; never expose it in the frontend or commit it to the repository.
 
-cron-job.org supports POST requests and custom headers, but its free service closes requests after 30 seconds. That is shorter than a possible Render Free cold start, so it is unsuitable as the reliable scheduler for this hosted build.
+`.github/workflows/refresh-open-data.yml` has deliberately been changed to a manual-only recovery workflow. Never restore its 15-minute schedule while the Render Cron Job is active, because the duplicate source traffic increases the chance of HTTP 429 rate limits.
 
-## Security
+## ETL behaviour and failure handling
 
-Set a long random `ETL_TRIGGER_TOKEN` in the Render API service environment variables. The GitHub Actions scheduler must send the same value in the `X-ETL-Token` request header. Do not put this value in frontend variables, screenshots, source code, or public documentation.
+The ETL now uses the City of Melbourne JSON export endpoint rather than requesting many oversized records pages. The records API accepts at most 100 rows per ungrouped page; a previous 1,000-row page configuration could be rejected or require repeated requests. Each normal minute job fetches one bounded source snapshot, retains only the newest 60 minutes of source readings, upserts by `(location_id, sensing_datetime)`, and removes local rows older than 90 minutes.
 
-The endpoint returns `503` when the token has not been configured and `401` when the supplied token does not match.
+A PostgreSQL advisory lock allows only one ingestion run at a time. An overlapping invocation returns a conflict rather than writing concurrently. Every source attempt first records `running`, then finishes as `succeeded`, `failed`, or `rate_limited`; those details appear in `/api/v1/data-status`.
 
-## Verification
+- HTTP 429: no immediate retry; wait for the next scheduled Cron run or add an approved provider API key.
+- Source or database error: the job exits non-zero and the failed refresh log stays in PostgreSQL for diagnosis.
+- Stale data: route scoring excludes individual sensor readings older than `DATA_STALE_AFTER_MINUTES`; it does not let an old high count influence a route merely because another sensor is fresh.
 
-1. Trigger the workflow once manually from GitHub.
-2. Confirm the workflow log prints `{"status":"completed"}` and then a `data-status` response.
-3. Check that `latest_data_at` in that response matches the most recent official minute-count data available from City of Melbourne Open Data.
-4. Open `https://fit5120-tp20-onboarding.onrender.com/api/v1/data-status` directly if a second check is needed.
-5. Inspect Render logs if the request fails. The ETL records refresh attempts in the database, so failures remain auditable.
+## First-run verification
+
+1. Deploy the Web Service and wait for `/api/v1/health` to return `{"status":"ok","database":"connected"}`.
+2. Create the Cron Job with the command above and use Render's **Trigger Run** control once.
+3. In the Cron log, confirm `Open-data minute ingestion completed successfully.`
+4. Open `/api/v1/data-status`; it should show `last_refresh_status: "succeeded"` and a recent `latest_data_at`.
+5. Confirm the frontend calls the deployed API in the browser network panel, rather than `http://localhost:8000`.
+
+For a manual complete recovery refresh, call the protected API with `POST /api/v1/internal/ingest?scope=all` and the `X-ETL-Token` header. Do not schedule the `all` scope every 15 minutes.

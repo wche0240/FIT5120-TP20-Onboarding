@@ -1,16 +1,14 @@
-name: Refresh Open Data
+name: Manual Open Data Refresh
 
 on:
-  schedule:
-    # Offset from the start of each hour to reduce GitHub Actions scheduler delay.
-    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 # This workflow only calls the protected production API; it does not need
 # repository contents or a direct database connection.
 permissions: {}
 
-# Do not start a second ingestion while the previous refresh is still running.
+# Manual recovery only. The production schedule belongs to the Render Cron Job.
+# Do not start a second recovery refresh while the previous one is still running.
 concurrency:
   group: production-open-data-refresh
   cancel-in-progress: false
@@ -34,6 +32,7 @@ jobs:
           # database that the public website reads from.
           # Retry temporary service failures, but do not retry a 429 response.
           # A provider quota limit cannot be resolved by an immediate retry.
+          refresh_exit=0
           for attempt in 1 2 3; do
             echo "Production ingestion attempt ${attempt}/3"
             response_file="$(mktemp)"
@@ -46,7 +45,7 @@ jobs:
               --max-time 150 \
               --output "$response_file" \
               --write-out "%{http_code}" \
-              -X POST "${API_BASE_URL}/api/v1/internal/ingest" \
+              -X POST "${API_BASE_URL}/api/v1/internal/ingest?scope=minute" \
               -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}")"
             curl_exit=$?
             set -e
@@ -61,12 +60,14 @@ jobs:
 
             if [ "$status_code" = "429" ]; then
               echo "::warning::City of Melbourne Open Data rate limit reached; skipping immediate retries."
-              exit 1
+              refresh_exit=1
+              break
             fi
 
             if [ "${attempt}" = "3" ]; then
               echo "::error::Production ingestion failed after three attempts."
-              exit 1
+              refresh_exit=1
+              break
             fi
 
             echo "Waiting 60 seconds before retrying after a provider or service error."
@@ -83,3 +84,4 @@ jobs:
             --max-time 30 \
             "${API_BASE_URL}/api/v1/data-status"
           echo
+          exit "$refresh_exit"

@@ -19,7 +19,7 @@ class DataStatusResponse(BaseModel):
     age_minutes: int | None
     stale_after_minutes: int
     message: str
-    last_refresh_status: Literal["running", "succeeded", "failed", "unavailable"]
+    last_refresh_status: Literal["running", "succeeded", "failed", "rate_limited", "unavailable"]
     last_refresh_started_at: datetime | None
     last_refresh_completed_at: datetime | None
     last_refresh_error: str | None

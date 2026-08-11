@@ -32,11 +32,11 @@ Project setup in progress.
 
 ## Production Deployment
 
-SensoryWay is deployed as separate services: the Next.js frontend on Vercel, and the FastAPI API plus PostgreSQL database on Render. A protected API endpoint allows a free external scheduler to run the Open Data ETL every 15 minutes. Use `backend/Dockerfile.production` with the repository root as the Docker build context. The API health check is `/api/v1/health`; run `python -m scripts.migrate` before starting the API against a new cloud database.
+SensoryWay is deployed as separate services: the Next.js frontend on Vercel, and the FastAPI API plus PostgreSQL database on Render. The API image uses `backend/Dockerfile.production` with the repository root as the Docker build context; it applies pending migrations and then serves `/api/v1/health`. A separate Render Cron Job runs the minute-data ETL every 15 minutes and exits.
 
 Keep all production credentials in the Vercel or Render environment-variable settings. Do not commit `.env`, `.env.local`, Google Maps keys, ORS keys, or database URLs.
 
-For the free production ETL schedule, see `docs/production-etl-scheduling.md`. The scheduler calls `POST /api/v1/internal/ingest` with an `X-ETL-Token` header. The endpoint is unavailable until `ETL_TRIGGER_TOKEN` is configured in Render.
+For the ETL scopes, failure handling and deployment commands, see `docs/production-etl-scheduling.md`. The protected `POST /api/v1/internal/ingest` endpoint remains available for a manual recovery refresh when `ETL_TRIGGER_TOKEN` is configured in Render.
 
 ## Epic 1 Data Layer
 

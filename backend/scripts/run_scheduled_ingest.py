@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime, timezone
 
-from app.etl import OpenDataRateLimitError, ingest
+from app.etl import OpenDataRateLimitError, ingest, validate_scope
 
 
 def refresh_interval_seconds() -> int:
@@ -20,6 +20,11 @@ def refresh_interval_seconds() -> int:
         raise ValueError("ETL_REFRESH_INTERVAL_MINUTES must be at least 1 minute.")
 
     return interval_minutes * 60
+
+
+def scheduled_scope() -> str:
+    """Read the same strict scope used by the hosted scheduler."""
+    return validate_scope(os.getenv("ETL_SCOPE", "minute"))
 
 
 def rate_limit_delay_seconds(
@@ -52,13 +57,14 @@ def rate_limit_delay_seconds(
 def run_forever(sleep=time.sleep) -> None:
     """Keep attempting refreshes so transient source failures do not stop the service."""
     interval_seconds = refresh_interval_seconds()
-    print(f"Open-data scheduler started; refreshing every {interval_seconds // 60} minutes.")
+    scope = scheduled_scope()
+    print(f"Open-data scheduler started; refreshing {scope} every {interval_seconds // 60} minutes.")
 
     while True:
         delay_seconds = interval_seconds
         try:
-            ingest()
-            print("Scheduled open-data ingestion completed successfully.")
+            ingest(scope)
+            print(f"Scheduled {scope} open-data ingestion completed successfully.")
         except OpenDataRateLimitError as error:
             delay_seconds = rate_limit_delay_seconds(error, interval_seconds)
             wait_minutes = (delay_seconds + 59) // 60

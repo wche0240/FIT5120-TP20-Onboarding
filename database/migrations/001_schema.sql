@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS data_refresh_log (
     source_url TEXT NOT NULL,
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
-    status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+    status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'rate_limited')),
     records_received INTEGER NOT NULL DEFAULT 0,
     records_upserted INTEGER NOT NULL DEFAULT 0,
     error_message TEXT

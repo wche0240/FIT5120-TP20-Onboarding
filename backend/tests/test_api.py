@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import get_db
-from app.etl import OpenDataRateLimitError
+from app.etl import ETLAlreadyRunningError, OpenDataRateLimitError
 from app.main import app, crowd_thresholds, stale_after_minutes
 from app.routing import WalkingRoute
 from app.schemas import RouteScoreResponse
@@ -59,21 +59,23 @@ def test_etl_trigger_requires_a_matching_token(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_etl_trigger_runs_ingestion_with_a_matching_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[bool] = []
+    calls: list[str] = []
     monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
-    monkeypatch.setattr("app.main.ingest", lambda: calls.append(True))
+    monkeypatch.setattr("app.main.ingest", lambda scope: calls.append(scope))
 
-    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "test-trigger-token"})
+    response = TestClient(app).post(
+        "/api/v1/internal/ingest?scope=minute", headers={"X-ETL-Token": "test-trigger-token"}
+    )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "completed"}
-    assert calls == [True]
+    assert response.json() == {"status": "completed", "scope": "minute"}
+    assert calls == ["minute"]
 
 
 def test_etl_trigger_reports_a_provider_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
 
-    def raise_rate_limit() -> None:
+    def raise_rate_limit(_scope: str) -> None:
         raise OpenDataRateLimitError("City provider quota reached")
 
     monkeypatch.setattr("app.main.ingest", raise_rate_limit)
@@ -82,6 +84,29 @@ def test_etl_trigger_reports_a_provider_rate_limit(monkeypatch: pytest.MonkeyPat
 
     assert response.status_code == 429
     assert response.json()["detail"] == "City provider quota reached"
+
+
+def test_etl_trigger_rejects_an_invalid_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ingest?scope=invalid", headers={"X-ETL-Token": "test-trigger-token"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_etl_trigger_reports_a_running_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    def already_running(_scope: str) -> None:
+        raise ETLAlreadyRunningError("already running")
+
+    monkeypatch.setattr("app.main.ingest", already_running)
+
+    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "test-trigger-token"})
+
+    assert response.status_code == 409
 
 
 def test_profiled_crowd_thresholds_are_the_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,6 +256,40 @@ def test_route_score_returns_a_crowd_level_for_fresh_sensor_data() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "available"
     assert response.json()["crowd_level"] == "high"
+    assert response.json()["matched_sensor_count"] == 1
+
+
+def test_route_score_excludes_stale_sensor_readings() -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        {
+            "location_id": 1,
+            "latitude": -37.81,
+            "longitude": 144.9652,
+            "last_seen_at": now - timedelta(minutes=50),
+            "total_count": 180,
+        },
+        {
+            "location_id": 2,
+            "latitude": -37.81,
+            "longitude": 144.9653,
+            "last_seen_at": now,
+            "total_count": 5,
+        },
+    ]
+
+    response = client_for(mock_connection(rows=rows)).post(
+        "/api/v1/route-score",
+        json={
+            "coordinates": [
+                {"longitude": 144.965, "latitude": -37.81},
+                {"longitude": 144.966, "latitude": -37.81},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["crowd_level"] == "low"
     assert response.json()["matched_sensor_count"] == 1
 
 
