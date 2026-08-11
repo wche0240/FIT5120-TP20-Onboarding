@@ -30,7 +30,7 @@ Set these API environment variables:
 ```text
 DATABASE_URL=<Render Postgres internal URL>
 CORS_ORIGINS=<exact deployed frontend origin>
-DATA_STALE_AFTER_MINUTES=45
+DATA_STALE_AFTER_MINUTES=60
 ETL_TRIGGER_TOKEN=<long random secret, only for manual API recovery>
 ```
 

@@ -140,11 +140,11 @@ def test_data_status_reports_the_last_refresh_failure() -> None:
     assert response.json()["last_refresh_error"] == "City provider quota reached"
 
 
-def test_default_freshness_window_accepts_data_up_to_45_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_freshness_window_accepts_data_up_to_60_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATA_STALE_AFTER_MINUTES", raising=False)
-    latest = datetime.now(timezone.utc) - timedelta(minutes=40)
+    latest = datetime.now(timezone.utc) - timedelta(minutes=55)
     response = client_for(mock_connection(row={"latest_data_at": latest})).get("/api/v1/data-status")
-    assert stale_after_minutes() == 45
+    assert stale_after_minutes() == 60
     assert response.status_code == 200
     assert response.json()["status"] == "available"
 
@@ -266,7 +266,7 @@ def test_route_score_excludes_stale_sensor_readings() -> None:
             "location_id": 1,
             "latitude": -37.81,
             "longitude": 144.9652,
-            "last_seen_at": now - timedelta(minutes=50),
+            "last_seen_at": now - timedelta(minutes=65),
             "total_count": 180,
         },
         {

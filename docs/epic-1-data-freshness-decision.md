@@ -2,40 +2,40 @@
 
 ## Decision
 
-For the onboarding MVP, `DATA_STALE_AFTER_MINUTES` is **45 minutes**. Pedestrian crowd scores are shown only when the newest minute-count record is 45 minutes old or newer. The interface labels this as recent data, not real-time data.
+For the onboarding MVP, `DATA_STALE_AFTER_MINUTES` is **60 minutes**. Pedestrian crowd scores are shown only when the newest minute-count record is 60 minutes old or newer. Eligible data is labelled `Recent data`; the interface does not render a `Crowd data delayed` status chip.
 
 ## Evidence
 
-On 5 August 2026, the ETL successfully refreshed the official City of Melbourne sensor-location and past-hour minute-count datasets. The newest available source reading was 34 minutes old when the API was checked. This exceeded the former 30-minute limit despite a successful ETL run, so the project decision is to use a documented 45-minute window for this onboarding MVP.
+City of Melbourne publishes the past-hour minute-count dataset in 15-minute batches, but the timestamp of its newest observation can lag behind the successful ETL completion time. On 11 August 2026, a successful Render Cron run completed at 14:30 UTC while the newest official reading was 13:55 UTC (35 minutes old). A 60-minute boundary accommodates this observed batch-processing latency without treating arbitrarily old data as current.
 
-This is treated as a data-latency limitation of the public source, not as a live-data failure in SensoryWay.
+This is a public-source latency limitation, not an ETL failure: `data_refresh_log` recorded the run as `succeeded`.
 
 ## Rationale
 
 - The official source can be delayed by more than 30 minutes even after a successful refresh.
-- A 45-minute threshold allows the product to show recent official observations while still withholding data that is materially outdated.
-- The product labels eligible scores as recent data, not current or real-time data.
-- Returning route geometry with a visible warning still supports route planning while meeting Epic 1 US 1.2's requirement to warn users when crowd data is unavailable or outdated.
+- A 60-minute boundary allows the product to show recent official observations across several scheduled source batches.
+- The interface labels eligible scores as recent data, not live or real-time data.
+- When the source is older than 60 minutes, crowd recommendations are withheld rather than inferred from outdated observations.
 
-## User-facing Behaviour
+## User-facing behaviour
 
-| Data age or coverage | API behaviour | UI requirement |
+| Data age or coverage | API behaviour | UI behaviour |
 | --- | --- | --- |
-| 45 minutes or newer and route has nearby sensors | Return crowd score and eligible recommendation | Show the crowd indicator as recent data and the recommended route. |
-| Older than 45 minutes | Return physical walking routes with `degraded` status | Show that crowd data is outdated; do not recommend a quieter route. |
+| 60 minutes or newer and route has nearby sensors | Return crowd score and eligible recommendation | Show the `Recent data` chip and the recommended route. |
+| Older than 60 minutes | Return physical walking routes with `degraded` status | Do not show the `Crowd data delayed` chip; withhold crowd recommendations and show the existing general route warning. |
 | No sensor coverage or no readings | Return physical walking routes with `unavailable` status | Explain that crowd information is unavailable; do not infer a low crowd level. |
 | No route meets the user's selected threshold | Return scored alternatives without a recommendation | Warn that no currently monitored route meets the threshold. |
 
-## Review Trigger
+## Review trigger
 
-Before the Epic 1 release, review the timestamps captured in `data_refresh_log` across multiple ETL runs. Record this 45-minute product decision, the source-latency evidence and any required mentor approval in the PGP.
+Before the Epic 1 release, review source timestamps and `data_refresh_log` across multiple Cron runs. Record whether the 60-minute boundary continues to match observed source latency and obtain any required mentor approval in the PGP.
 
-## PGP Evidence Text
+## PGP evidence text
 
-> SensoryWay uses City of Melbourne minute-level pedestrian Open Data and applies a 45-minute freshness threshold. During integration testing on 5 August 2026, the latest official record was 34 minutes old after a successful ETL refresh. The interface describes eligible readings as recent data, not real-time data. Data older than 45 minutes continues to withhold crowd recommendations and display an outdated-data warning.
+> SensoryWay uses City of Melbourne minute-level pedestrian Open Data and applies a 60-minute freshness threshold. The source is published in 15-minute batches but can deliver observations with additional processing delay. Eligible readings are labelled as recent data, not real-time data. Data older than 60 minutes withholds crowd recommendations without rendering a separate crowd-delay status chip.
 
-## LeanKit Updates
+## LeanKit updates
 
 - Move **Server-side OpenRouteService route integration** to **Done**. Evidence: commit `4f1d293`, `POST /api/v1/routes`, and successful live test returning three walking routes.
-- Move **Data freshness warning for outdated pedestrian data** to **Done**. Evidence: `GET /api/v1/data-status` and `POST /api/v1/routes` returned `degraded` when the latest official reading was 41 minutes old.
+- Move **Data freshness warning for outdated pedestrian data** to **Done**. Evidence: `GET /api/v1/data-status` and `POST /api/v1/routes` return `degraded` when the latest official reading is older than 60 minutes.
 - Move **Review Open Data freshness threshold before Epic 1 release** to **In Progress**. Attach this decision record and obtain any required mentor approval before moving it to Done.

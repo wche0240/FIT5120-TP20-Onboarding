@@ -48,5 +48,5 @@ The current configuration uses Low `0-10`, Medium `11-30`, and High `31+` pedest
 
 - The source only records a minute when at least one pedestrian is detected, so no row does not automatically mean a confirmed zero count.
 - The source is refreshed periodically rather than being a direct sensor stream.
-- The 45-minute freshness decision and its observed source latency are documented in `docs/epic-1-data-freshness-decision.md`.
+- The 60-minute freshness decision and its observed source latency are documented in `docs/epic-1-data-freshness-decision.md`.
 - Access-point data is limited to the Melbourne CBD onboarding boundary; see `docs/epic-1-public-transport-integration.md`.
