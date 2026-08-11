@@ -6,7 +6,6 @@ import {
   Bookmark,
   BookmarkCheck,
   BookmarkPlus,
-  ChevronRight,
   CircleUserRound,
   Compass,
   LoaderCircle,
@@ -15,7 +14,6 @@ import {
   Navigation,
   Route,
   Search,
-  ShieldCheck,
   TrainFront,
   Trash2,
   UsersRound,
@@ -150,6 +148,7 @@ export default function HomePage() {
   const [crowdLevel, setCrowdLevel] = useState<CrowdLevel>("medium");
   const [result, setResult] = useState<RoutesResponse | null>(null);
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null);
+  const [goRouteId, setGoRouteId] = useState<number | null>(null);
   const [transitAccessPoints, setTransitAccessPoints] = useState<TransitAccessPoint[]>([]);
   const [nearbyTransit, setNearbyTransit] = useState<{ start: TransitAccessPoint[]; destination: TransitAccessPoint[] }>({ start: [], destination: [] });
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +160,16 @@ export default function HomePage() {
 
   const start = resolvedStart ?? findPlace(startLabel) ?? PLACES[0];
   const destination = resolvedDestination ?? findPlace(destinationLabel) ?? PLACES[4];
-  const activeRoute = useMemo(() => result?.routes.find((route) => route.route_id === activeRouteId) ?? null, [activeRouteId, result]);
+  const visibleRoutes = useMemo(() => {
+    if (!result) return [];
+    if (goRouteId === null) return result.routes;
+    return result.routes.filter((route) => route.route_id === goRouteId);
+  }, [goRouteId, result]);
+
+  const activeRoute = useMemo(() => {
+    if (visibleRoutes.length === 0) return null;
+    return visibleRoutes.find((route) => route.route_id === activeRouteId) ?? visibleRoutes[0] ?? null;
+  }, [activeRouteId, visibleRoutes]);
 
   useEffect(() => {
     let isCurrent = true;
@@ -323,13 +331,27 @@ export default function HomePage() {
       }
       setResult(body);
       setActiveRouteId(body.recommended_route_id ?? body.routes[0]?.route_id ?? null);
+      setGoRouteId(null);
       void loadNearbyTransit(selectedStart, selectedDestination);
     } catch (requestError) {
       setResult(null);
       setActiveRouteId(null);
+      setGoRouteId(null);
       setError(requestError instanceof Error ? requestError.message : "Could not plan a route.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  function selectRouteAndGo(routeId: number) {
+    setActiveRouteId(routeId);
+    setGoRouteId(routeId);
+  }
+
+  function showAllRoutes() {
+    setGoRouteId(null);
+    if (result?.recommended_route_id) {
+      setActiveRouteId(result.recommended_route_id);
     }
   }
 
@@ -375,7 +397,7 @@ export default function HomePage() {
       </nav>
 
       <section className="map-stage" aria-label="Route planner">
-        <SensoryWayMap start={start} destination={destination} routes={result?.routes ?? []} transitAccessPoints={transitAccessPoints} crowdDataAvailable={result?.status === "available"} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} onTransitPointSelect={selectTransitPoint} />
+        <SensoryWayMap start={start} destination={destination} routes={visibleRoutes} transitAccessPoints={transitAccessPoints} crowdDataAvailable={result?.status === "available"} activeRouteId={activeRouteId} onRouteSelect={setActiveRouteId} onTransitPointSelect={selectTransitPoint} />
 
         <aside className="map-sidebar" aria-label="SensoryWay workspace">
           {activeView === "explore" ? <>
@@ -462,17 +484,41 @@ export default function HomePage() {
                   </button> : null}
                 </div>
               </div>
+              {goRouteId !== null ? (
+                <button type="button" className="show-all-routes-button" onClick={showAllRoutes}>Show all routes</button>
+              ) : null}
               <div className="route-list">
-                {result.routes.map((route) => (
-                  <button key={route.route_id} className={activeRouteId === route.route_id ? "route-option active" : "route-option"} onClick={() => setActiveRouteId(route.route_id)}>
+                {visibleRoutes.map((route) => (
+                  <div
+                    key={route.route_id}
+                    className={activeRouteId === route.route_id ? "route-option active" : "route-option"}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setActiveRouteId(route.route_id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setActiveRouteId(route.route_id);
+                      }
+                    }}
+                  >
                     <span className={route.crowd_level ? `route-swatch ${route.crowd_level}` : "route-swatch unknown"} aria-hidden="true" />
                     <span className="route-main">
                       <strong>Route {route.route_id} - {routeLabel(route)}</strong>
                       <span>{formatDistance(route.distance_metres)} · {formatDuration(route.duration_seconds)}</span>
                     </span>
                     <span className={`coverage-chip ${confidenceTone(route)}`}>{confidenceLabel(route)}</span>
-                    {route.recommended ? <span className="recommended-mark"><ShieldCheck size={17} />Recommended</span> : <ChevronRight size={19} aria-hidden="true" />}
-                  </button>
+                    <button
+                      type="button"
+                      className="go-mark"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        selectRouteAndGo(route.route_id);
+                      }}
+                    >
+                      GO
+                    </button>
+                  </div>
                 ))}
               </div>
               <p className="route-detail">Destination: {destination.label}.</p>
