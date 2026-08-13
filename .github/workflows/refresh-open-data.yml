@@ -1,0 +1,87 @@
+name: Manual Open Data Refresh
+
+on:
+  workflow_dispatch:
+
+# This workflow only calls the protected production API; it does not need
+# repository contents or a direct database connection.
+permissions: {}
+
+# Manual recovery only. The production schedule belongs to the Render Cron Job.
+# Do not start a second recovery refresh while the previous one is still running.
+concurrency:
+  group: production-open-data-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Trigger the Render production ETL
+        env:
+          API_BASE_URL: https://fit5120-tp20-onboarding.onrender.com
+          ETL_TRIGGER_TOKEN: ${{ secrets.ETL_TRIGGER_TOKEN }}
+        run: |
+          if [ -z "$ETL_TRIGGER_TOKEN" ]; then
+            echo "::error::GitHub Actions secret ETL_TRIGGER_TOKEN is missing."
+            exit 1
+          fi
+
+          # Call the deployed API so the job updates the exact PostgreSQL
+          # database that the public website reads from.
+          # Retry temporary service failures, but do not retry a 429 response.
+          # A provider quota limit cannot be resolved by an immediate retry.
+          refresh_exit=0
+          for attempt in 1 2 3; do
+            echo "Production ingestion attempt ${attempt}/3"
+            response_file="$(mktemp)"
+            set +e
+            status_code="$(curl \
+              --silent \
+              --show-error \
+              --location \
+              --connect-timeout 20 \
+              --max-time 150 \
+              --output "$response_file" \
+              --write-out "%{http_code}" \
+              -X POST "${API_BASE_URL}/api/v1/internal/ingest?scope=minute" \
+              -H "X-ETL-Token: ${ETL_TRIGGER_TOKEN}")"
+            curl_exit=$?
+            set -e
+
+            cat "$response_file"
+            rm -f "$response_file"
+            echo
+
+            if [ "$curl_exit" -eq 0 ] && [ "$status_code" = "200" ]; then
+              break
+            fi
+
+            if [ "$status_code" = "429" ]; then
+              echo "::warning::City of Melbourne Open Data rate limit reached; skipping immediate retries."
+              refresh_exit=1
+              break
+            fi
+
+            if [ "${attempt}" = "3" ]; then
+              echo "::error::Production ingestion failed after three attempts."
+              refresh_exit=1
+              break
+            fi
+
+            echo "Waiting 60 seconds before retrying after a provider or service error."
+            sleep 60
+          done
+
+          echo
+          echo "Latest data timestamp observed by the public API:"
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --location \
+            --max-time 30 \
+            "${API_BASE_URL}/api/v1/data-status"
+          echo
+          exit "$refresh_exit"

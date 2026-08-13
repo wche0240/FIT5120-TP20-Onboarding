@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    MIGRATIONS_DIR=/migrations
+
+WORKDIR /app
+
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/app ./app
+COPY backend/scripts ./scripts
+COPY database/migrations /migrations
+
+# A Render Web Service must serve the API by default. A separate Cron Job explicitly
+# overrides this command with `python -m scripts.ingest_open_data --scope minute`.
+CMD ["python", "-m", "scripts.start_api"]

@@ -30,6 +30,14 @@ data/processed/  Cleaned or generated data (not committed)
 
 Project setup in progress.
 
+## Production Deployment
+
+SensoryWay is deployed as separate services: the Next.js frontend on Vercel, and the FastAPI API plus PostgreSQL database on Render. The API image uses `backend/Dockerfile.production` with the repository root as the Docker build context; it applies pending migrations and then serves `/api/v1/health`. A separate Render Cron Job runs the minute-data ETL every 15 minutes and exits.
+
+Keep all production credentials in the Vercel or Render environment-variable settings. Do not commit `.env`, `.env.local`, Google Maps keys, ORS keys, or database URLs.
+
+For the ETL scopes, failure handling and deployment commands, see `docs/production-etl-scheduling.md`. The protected `POST /api/v1/internal/ingest` endpoint remains available for a manual recovery refresh when `ETL_TRIGGER_TOKEN` is configured in Render.
+
 ## Epic 1 Data Layer
 
 The first build stores City of Melbourne sensor locations and minute-level pedestrian counts in PostgreSQL. The ETL process archives the source response, removes duplicate composite keys, validates required fields, converts timestamps to the Melbourne timezone, and records every refresh attempt.
@@ -46,9 +54,9 @@ The API documentation is available at `http://localhost:8000/docs` after the API
 
 Set `ORS_API_KEY` in the local `.env` before using `POST /api/v1/routes`. Do not commit the key.
 
-Pedestrian data older than 45 minutes is intentionally treated as outdated. SensoryWay still shows physical route options but withholds crowd recommendations; see `docs/epic-1-data-freshness-decision.md` for the recorded decision and evidence.
+Pedestrian data older than 60 minutes is intentionally treated as outdated. SensoryWay still shows physical route options but withholds crowd recommendations; see `docs/epic-1-data-freshness-decision.md` for the recorded decision and evidence.
 
-`ETL_REFRESH_INTERVAL_MINUTES` defaults to 15. This keeps the local database refreshed while correctly preserving the 45-minute freshness warning whenever the official source itself is delayed.
+`ETL_REFRESH_INTERVAL_MINUTES` defaults to 15. This keeps the local database refreshed while correctly preserving the 60-minute freshness boundary whenever the official source itself is delayed.
 
 Crowd thresholds are Low `0-10`, Medium `11-30`, and High `31+` pedestrians per minute. They were profiled against the onboarding minute-count snapshot; see `docs/epic-1-crowd-threshold-decision.md` for the evidence, limitations, and required PGP/LeanKit updates.
 

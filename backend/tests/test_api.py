@@ -5,14 +5,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.database import get_db
+from app.etl import ETLAlreadyRunningError, OpenDataRateLimitError
 from app.main import app, crowd_thresholds, stale_after_minutes
 from app.routing import WalkingRoute
 from app.schemas import RouteScoreResponse
 
 
-def mock_connection(row=None, rows=None) -> MagicMock:
+def mock_connection(row=None, rows=None, refresh_row=None) -> MagicMock:
     cursor = MagicMock()
-    cursor.fetchone.return_value = row
+    cursor.fetchone.side_effect = [row, refresh_row]
     cursor.fetchall.return_value = rows or []
     connection = MagicMock()
     connection.cursor.return_value.__enter__.return_value = cursor
@@ -39,6 +40,75 @@ def test_health_confirms_database_connection() -> None:
     assert response.json() == {"status": "ok", "database": "connected"}
 
 
+def test_etl_trigger_rejects_requests_without_a_configured_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ETL_TRIGGER_TOKEN", raising=False)
+
+    response = TestClient(app).post("/api/v1/internal/ingest")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ETL trigger is not configured on this server."
+
+
+def test_etl_trigger_requires_a_matching_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "incorrect"})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid ETL trigger token."
+
+
+def test_etl_trigger_runs_ingestion_with_a_matching_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+    monkeypatch.setattr("app.main.ingest", lambda scope: calls.append(scope))
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ingest?scope=minute", headers={"X-ETL-Token": "test-trigger-token"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed", "scope": "minute"}
+    assert calls == ["minute"]
+
+
+def test_etl_trigger_reports_a_provider_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    def raise_rate_limit(_scope: str) -> None:
+        raise OpenDataRateLimitError("City provider quota reached")
+
+    monkeypatch.setattr("app.main.ingest", raise_rate_limit)
+
+    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "test-trigger-token"})
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "City provider quota reached"
+
+
+def test_etl_trigger_rejects_an_invalid_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    response = TestClient(app).post(
+        "/api/v1/internal/ingest?scope=invalid", headers={"X-ETL-Token": "test-trigger-token"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_etl_trigger_reports_a_running_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ETL_TRIGGER_TOKEN", "test-trigger-token")
+
+    def already_running(_scope: str) -> None:
+        raise ETLAlreadyRunningError("already running")
+
+    monkeypatch.setattr("app.main.ingest", already_running)
+
+    response = TestClient(app).post("/api/v1/internal/ingest", headers={"X-ETL-Token": "test-trigger-token"})
+
+    assert response.status_code == 409
+
+
 def test_profiled_crowd_thresholds_are_the_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CROWD_LOW_MAX", raising=False)
     monkeypatch.delenv("CROWD_MEDIUM_MAX", raising=False)
@@ -51,13 +121,30 @@ def test_data_status_reports_available_data() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "available"
     assert response.json()["age_minutes"] == 5
+    assert response.json()["last_refresh_status"] == "unavailable"
 
 
-def test_default_freshness_window_accepts_data_up_to_45_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_data_status_reports_the_last_refresh_failure() -> None:
+    latest = datetime.now(timezone.utc) - timedelta(minutes=5)
+    refresh = {
+        "status": "failed",
+        "started_at": latest - timedelta(minutes=1),
+        "completed_at": latest,
+        "error_message": "City provider quota reached",
+    }
+
+    response = client_for(mock_connection(row={"latest_data_at": latest}, refresh_row=refresh)).get("/api/v1/data-status")
+
+    assert response.status_code == 200
+    assert response.json()["last_refresh_status"] == "failed"
+    assert response.json()["last_refresh_error"] == "City provider quota reached"
+
+
+def test_default_freshness_window_accepts_data_up_to_60_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATA_STALE_AFTER_MINUTES", raising=False)
-    latest = datetime.now(timezone.utc) - timedelta(minutes=40)
+    latest = datetime.now(timezone.utc) - timedelta(minutes=55)
     response = client_for(mock_connection(row={"latest_data_at": latest})).get("/api/v1/data-status")
-    assert stale_after_minutes() == 45
+    assert stale_after_minutes() == 60
     assert response.status_code == 200
     assert response.json()["status"] == "available"
 
@@ -169,6 +256,40 @@ def test_route_score_returns_a_crowd_level_for_fresh_sensor_data() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "available"
     assert response.json()["crowd_level"] == "high"
+    assert response.json()["matched_sensor_count"] == 1
+
+
+def test_route_score_excludes_stale_sensor_readings() -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        {
+            "location_id": 1,
+            "latitude": -37.81,
+            "longitude": 144.9652,
+            "last_seen_at": now - timedelta(minutes=65),
+            "total_count": 180,
+        },
+        {
+            "location_id": 2,
+            "latitude": -37.81,
+            "longitude": 144.9653,
+            "last_seen_at": now,
+            "total_count": 5,
+        },
+    ]
+
+    response = client_for(mock_connection(rows=rows)).post(
+        "/api/v1/route-score",
+        json={
+            "coordinates": [
+                {"longitude": 144.965, "latitude": -37.81},
+                {"longitude": 144.966, "latitude": -37.81},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["crowd_level"] == "low"
     assert response.json()["matched_sensor_count"] == 1
 
 

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import asin, cos, radians, sin, sqrt
 from typing import Any
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import get_db
+from app.etl import ETLAlreadyRunningError, MINUTE_COUNTS_DATASET, OpenDataRateLimitError, ingest, validate_scope
 from app.geocoding import GeocodingError, is_in_melbourne_cbd, search_cbd_locations
 from app.route_scoring import SensorReading, assess_route_segments, score_route
 from app.routing import OpenRouteServiceError, request_walking_routes
@@ -25,6 +29,9 @@ from app.schemas import (
     SensorResponse,
     TransitAccessPointResponse,
 )
+
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI(
     title="SensoryWay API",
@@ -43,7 +50,7 @@ app.add_middleware(
 
 
 def stale_after_minutes() -> int:
-    configured_minutes = int(os.getenv("DATA_STALE_AFTER_MINUTES", "45"))
+    configured_minutes = int(os.getenv("DATA_STALE_AFTER_MINUTES", "60"))
     if configured_minutes <= 0:
         raise RuntimeError("DATA_STALE_AFTER_MINUTES must be positive")
     return configured_minutes
@@ -99,8 +106,29 @@ def score_coordinates(
     latest_data_at = max(row["last_seen_at"] for row in rows)
     if latest_data_at.tzinfo is None:
         latest_data_at = latest_data_at.replace(tzinfo=timezone.utc)
-    age_minutes = max(0, int((datetime.now(timezone.utc) - latest_data_at).total_seconds() // 60))
+    now = datetime.now(timezone.utc)
+    age_minutes = max(0, int((now - latest_data_at).total_seconds() // 60))
     if age_minutes > stale_after_minutes():
+        return RouteScoreResponse(
+            status="stale",
+            crowd_level=None,
+            crowd_score=None,
+            data_coverage_confidence=None,
+            matched_sensor_count=0,
+            latest_data_at=latest_data_at,
+            warning="Pedestrian data is outdated, so no route crowd score is shown.",
+        )
+
+    freshness_cutoff = now - timedelta(minutes=stale_after_minutes())
+    fresh_rows = []
+    for row in rows:
+        last_seen_at = row["last_seen_at"]
+        if last_seen_at.tzinfo is None:
+            last_seen_at = last_seen_at.replace(tzinfo=timezone.utc)
+        if last_seen_at >= freshness_cutoff:
+            fresh_rows.append(row)
+
+    if not fresh_rows:
         return RouteScoreResponse(
             status="stale",
             crowd_level=None,
@@ -118,7 +146,7 @@ def score_coordinates(
             longitude=float(row["longitude"]),
             total_count=row["total_count"],
         )
-        for row in rows
+        for row in fresh_rows
     ]
     low_max, medium_max = crowd_thresholds()
     score = score_route(
@@ -193,14 +221,68 @@ def health(connection: psycopg.Connection[Any] = Depends(get_db)) -> HealthRespo
     return HealthResponse(status="ok", database="connected")
 
 
+@app.post("/api/v1/internal/ingest")
+def trigger_open_data_ingestion(
+    scope: str = Query(default="all"), x_etl_token: str | None = Header(default=None)
+) -> dict[str, str]:
+    """Run one protected Open Data refresh for an external scheduler."""
+    expected_token = os.getenv("ETL_TRIGGER_TOKEN", "").strip()
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="ETL trigger is not configured on this server.")
+    if not hmac.compare_digest(expected_token, x_etl_token or ""):
+        provided_fingerprint = hashlib.sha256((x_etl_token or "").encode()).hexdigest()[:12]
+        expected_fingerprint = hashlib.sha256(expected_token.encode()).hexdigest()[:12]
+        logger.warning(
+            "Rejected ETL trigger request (provided_fingerprint=%s, expected_fingerprint=%s)",
+            provided_fingerprint,
+            expected_fingerprint,
+        )
+        raise HTTPException(status_code=401, detail="Invalid ETL trigger token.")
+
+    try:
+        validated_scope = validate_scope(scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        ingest(validated_scope)
+    except ETLAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail="Open-data ingestion is already running.") from exc
+    except OpenDataRateLimitError as exc:
+        logger.warning("Open-data ingestion was rate-limited: %s", exc)
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except Exception as exc:
+        # Keep the scheduler response generic while preserving the traceback in Render logs.
+        logger.exception("Open-data ingestion failed")
+        raise HTTPException(status_code=500, detail="Open-data ingestion failed. Check server logs.") from exc
+    return {"status": "completed", "scope": validated_scope}
+
+
 @app.get("/api/v1/data-status", response_model=DataStatusResponse)
 def data_status(connection: psycopg.Connection[Any] = Depends(get_db)) -> DataStatusResponse:
     with connection.cursor() as cursor:
         cursor.execute("SELECT MAX(sensing_datetime) AS latest_data_at FROM pedestrian_minute_count")
         latest_row = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT status, started_at, completed_at, error_message
+            FROM data_refresh_log
+            WHERE dataset_name = %s
+            ORDER BY refresh_id DESC
+            LIMIT 1
+            """,
+            (MINUTE_COUNTS_DATASET,),
+        )
+        refresh_row = cursor.fetchone()
 
     limit_minutes = stale_after_minutes()
     latest_data_at = latest_row["latest_data_at"] if latest_row else None
+    refresh_details = {
+        "last_refresh_status": refresh_row["status"] if refresh_row else "unavailable",
+        "last_refresh_started_at": refresh_row["started_at"] if refresh_row else None,
+        "last_refresh_completed_at": refresh_row["completed_at"] if refresh_row else None,
+        "last_refresh_error": refresh_row["error_message"] if refresh_row else None,
+    }
     if latest_data_at is None:
         return DataStatusResponse(
             status="unavailable",
@@ -208,6 +290,7 @@ def data_status(connection: psycopg.Connection[Any] = Depends(get_db)) -> DataSt
             age_minutes=None,
             stale_after_minutes=limit_minutes,
             message="Pedestrian data is unavailable.",
+            **refresh_details,
         )
 
     if latest_data_at.tzinfo is None:
@@ -221,6 +304,7 @@ def data_status(connection: psycopg.Connection[Any] = Depends(get_db)) -> DataSt
         age_minutes=age_minutes,
         stale_after_minutes=limit_minutes,
         message=message,
+        **refresh_details,
     )
 
 
