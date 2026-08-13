@@ -6,7 +6,6 @@ import {
   Bookmark,
   BookmarkCheck,
   BookmarkPlus,
-  CircleUserRound,
   Compass,
   LoaderCircle,
   MapPinned,
@@ -16,7 +15,6 @@ import {
   Search,
   TrainFront,
   Trash2,
-  UsersRound,
   X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -63,7 +61,7 @@ type LocationSearchResult = {
 
 type SearchField = "start" | "destination";
 
-type AppView = "explore" | "saved" | "profile";
+type AppView = "explore" | "saved";
 
 type SavedRoute = {
   id: string;
@@ -393,7 +391,6 @@ export default function HomePage() {
           <button className={activeView === "explore" ? "rail-link is-active" : "rail-link"} type="button" aria-label="Explore routes" title="Explore routes" onClick={() => selectView("explore")}><Compass size={21} /><span>Explore</span></button>
           <button className={activeView === "saved" ? "rail-link is-active" : "rail-link"} type="button" aria-label="Saved routes" title="Saved routes" onClick={() => selectView("saved")}><Bookmark size={20} /><span>Saved</span></button>
         </div>
-        <button className={activeView === "profile" ? "icon-button is-active" : "icon-button"} type="button" aria-label="Route settings" title="Route settings" onClick={() => selectView("profile")}><CircleUserRound size={23} /></button>
       </nav>
 
       <section className="map-stage" aria-label="Route planner">
@@ -441,30 +438,6 @@ export default function HomePage() {
               <span>{isLoading ? "Finding routes" : "Find routes"}</span>
             </button>
           </form>
-
-        <section className="preference-panel" aria-labelledby="preference-heading">
-          <div className="panel-heading">
-            <div className="heading-icon blue"><UsersRound size={19} /></div>
-            <div>
-              <h1 id="preference-heading">Crowd preference</h1>
-              <p>Choose the highest crowd level you are comfortable with.</p>
-            </div>
-          </div>
-          <div className="level-selector" role="radiogroup" aria-label="Maximum crowd level">
-            {CROWD_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={crowdLevel === option.value ? `level-option level-${option.value} selected` : `level-option level-${option.value}`}
-                onClick={() => setCrowdLevel(option.value)}
-                role="radio"
-                aria-checked={crowdLevel === option.value}
-              >
-                <strong>{option.label}</strong><span>{option.help}</span>
-              </button>
-            ))}
-          </div>
-        </section>
 
         <section className="route-sheet" aria-live="polite">
           {error ? <div className="notice notice-error"><AlertTriangle size={20} /><p>{error}</p></div> : null}
@@ -543,16 +516,10 @@ export default function HomePage() {
         </> : null}
 
         {activeView === "saved" ? <section className="sidebar-view"><div className="view-heading"><Bookmark size={21} /><div><h1>Saved routes</h1><p>{savedRoutes.length ? `${savedRoutes.length} route${savedRoutes.length === 1 ? "" : "s"}` : "No saved routes"}</p></div></div>{savedRoutes.length ? <div className="saved-route-list">{savedRoutes.map((savedRoute) => <div className="saved-route" key={savedRoute.id}><button type="button" onClick={() => restoreSavedRoute(savedRoute)}><strong>{savedRoute.startLabel} to {savedRoute.destinationLabel}</strong><span>{formatDistance(savedRoute.distanceMetres)} 路 {formatDuration(savedRoute.durationSeconds)} · {savedRoute.crowdLevel} preference</span></button><button type="button" className="remove-saved-route" aria-label={`Remove saved route to ${savedRoute.destinationLabel}`} title="Remove saved route" onClick={() => setSavedRoutes((routes) => routes.filter((route) => route.id !== savedRoute.id))}><Trash2 size={17} /></button></div>)}</div> : <div className="empty-state"><Bookmark size={22} /><div><h2>Nothing saved yet</h2><p>Save an active route after planning your walk.</p></div></div>}</section> : null}
-        {activeView === "profile" ? <section className="sidebar-view"><div className="view-heading"><CircleUserRound size={22} /><div><h1>Route settings</h1><p>Stored only in this browser</p></div></div><div className="profile-preference"><h2>Preferred crowd level</h2><div className="level-selector" role="radiogroup" aria-label="Profile crowd preference">{CROWD_OPTIONS.map((option) => <button key={option.value} type="button" className={crowdLevel === option.value ? `level-option level-${option.value} selected` : `level-option level-${option.value}`} onClick={() => setCrowdLevel(option.value)} role="radio" aria-checked={crowdLevel === option.value}><strong>{option.label}</strong><span>{option.help}</span></button>)}</div></div></section> : null}
         </aside>
       </section>
 
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        <button className={activeView === "explore" ? "mobile-link is-active" : "mobile-link"} type="button" onClick={() => selectView("explore")}><Compass size={21} /><span>Explore</span></button>
-        <button className={activeView === "saved" ? "mobile-link is-active" : "mobile-link"} type="button" onClick={() => selectView("saved")}><Bookmark size={21} /><span>Saved</span></button>
-        <button className={activeView === "profile" ? "mobile-link is-active" : "mobile-link"} type="button" onClick={() => selectView("profile")}><CircleUserRound size={21} /><span>Profile</span></button>
-      </nav>
-      {isDrawerOpen ? <><button className="drawer-backdrop" type="button" aria-label="Close navigation" onClick={() => setIsDrawerOpen(false)} /><aside className="navigation-drawer" role="dialog" aria-modal="true" aria-label="Navigation menu"><div className="drawer-header"><div className="brand-mark" aria-hidden="true"><Navigation size={19} fill="currentColor" /></div><strong>SensoryWay</strong><button className="icon-button" type="button" aria-label="Close navigation" title="Close navigation" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button></div><div className="drawer-links"><button type="button" className={activeView === "explore" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("explore")}><Compass size={20} />Explore</button><button type="button" className={activeView === "saved" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("saved")}><Bookmark size={20} />Saved routes</button><button type="button" className={activeView === "profile" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("profile")}><CircleUserRound size={20} />Route settings</button></div></aside></> : null}
+      {isDrawerOpen ? <><button className="drawer-backdrop" type="button" aria-label="Close navigation" onClick={() => setIsDrawerOpen(false)} /><aside className="navigation-drawer" role="dialog" aria-modal="true" aria-label="Navigation menu"><div className="drawer-header"><div className="brand-mark" aria-hidden="true"><Navigation size={19} fill="currentColor" /></div><strong>SensoryWay</strong><button className="icon-button" type="button" aria-label="Close navigation" title="Close navigation" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button></div><div className="drawer-links"><button type="button" className={activeView === "explore" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("explore")}><Compass size={20} />Explore</button><button type="button" className={activeView === "saved" ? "drawer-link active" : "drawer-link"} onClick={() => selectView("saved")}><Bookmark size={20} />Saved routes</button></div></aside></> : null}
     </main>
   );
 }
