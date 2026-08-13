@@ -277,6 +277,13 @@ export default function SensoryWayMap({ start, destination, routes, transitAcces
   return (
     <>
       <div ref={mapElementRef} className="google-map" aria-label="Melbourne CBD route map" />
+      <aside className="map-legend" aria-label="Route colour legend">
+        <strong>Route legend</strong>
+        <div className="map-legend-row"><span className="map-legend-swatch no-data" aria-hidden="true" />No crowd data</div>
+        <div className="map-legend-row"><span className="map-legend-swatch low" aria-hidden="true" />Low crowd</div>
+        <div className="map-legend-row"><span className="map-legend-swatch medium" aria-hidden="true" />Medium crowd</div>
+        <div className="map-legend-row"><span className="map-legend-swatch high" aria-hidden="true" />High crowd</div>
+      </aside>
       {!isReady && <div className="map-loading" role="status">{loadError ?? "Loading Google Maps..."}</div>}
     </>
   );

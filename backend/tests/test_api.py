@@ -293,7 +293,7 @@ def test_route_score_excludes_stale_sensor_readings() -> None:
     assert response.json()["matched_sensor_count"] == 1
 
 
-def test_routes_recommends_the_quieter_route_within_the_selected_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_routes_recommends_the_quieter_route_when_crowd_data_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ORS_API_KEY", "test-key")
     rows = [
         {
@@ -331,20 +331,12 @@ def test_routes_recommends_the_quieter_route_within_the_selected_threshold(monke
     assert body["status"] == "available"
     assert body["recommended_route_id"] == 1
     assert body["routes"][0]["recommended"] is True
-    assert body["routes"][1]["meets_crowd_threshold"] is False
+    assert body["routes"][1]["meets_crowd_threshold"] is True
 
 
-def test_routes_warns_when_no_monitored_route_meets_the_threshold(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_routes_warns_when_current_crowd_data_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ORS_API_KEY", "test-key")
-    rows = [
-        {
-            "location_id": 1,
-            "latitude": -37.8100,
-            "longitude": 144.9652,
-            "last_seen_at": datetime.now(timezone.utc),
-            "total_count": 180,
-        }
-    ]
+    rows = []
     provider_routes = [WalkingRoute(coordinates=[(144.9650, -37.8100), (144.9660, -37.8100)], distance_metres=120, duration_seconds=90)]
     monkeypatch.setattr("app.main.request_walking_routes", lambda **_: provider_routes)
 
@@ -358,8 +350,10 @@ def test_routes_warns_when_no_monitored_route_meets_the_threshold(monkeypatch: p
     )
 
     assert response.status_code == 200
-    assert response.json()["recommended_route_id"] is None
-    assert "No currently monitored route" in response.json()["warning"]
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["recommended_route_id"] is None
+    assert "unavailable or outdated" in body["warning"]
 
 
 def test_routes_prioritises_options_with_more_than_50_percent_coverage(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,6 +6,7 @@ import {
   Bookmark,
   BookmarkCheck,
   BookmarkPlus,
+  Check,
   Compass,
   LoaderCircle,
   MapPinned,
@@ -135,10 +136,10 @@ function confidenceTone(route: ApiRoute) {
 }
 
 export default function HomePage() {
-  const [startLabel, setStartLabel] = useState("Melbourne Central");
-  const [destinationLabel, setDestinationLabel] = useState("Collins Street destination");
-  const [resolvedStart, setResolvedStart] = useState<Place | null>(PLACES[0]);
-  const [resolvedDestination, setResolvedDestination] = useState<Place | null>(PLACES[4]);
+  const [startLabel, setStartLabel] = useState("");
+  const [destinationLabel, setDestinationLabel] = useState("");
+  const [resolvedStart, setResolvedStart] = useState<Place | null>(null);
+  const [resolvedDestination, setResolvedDestination] = useState<Place | null>(null);
   const [locationSearchField, setLocationSearchField] = useState<SearchField | null>(null);
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSearchResult[]>([]);
   const [locationSearchError, setLocationSearchError] = useState<string | null>(null);
@@ -201,6 +202,62 @@ export default function HomePage() {
     if (savedRoutesLoaded) window.localStorage.setItem(SAVED_ROUTES_STORAGE_KEY, JSON.stringify(savedRoutes));
   }, [savedRoutes, savedRoutesLoaded]);
 
+  useEffect(() => {
+    if (!locationSearchField) return;
+
+    const query = locationSearchField === "start" ? startLabel : destinationLabel;
+    const normalised = query.trim();
+    const localMatches = PLACES.filter((place) =>
+      place.label.toLowerCase().includes(normalised.toLowerCase()) || place.detail.toLowerCase().includes(normalised.toLowerCase())
+    ).map((place) => ({
+      name: place.label,
+      display_name: place.detail,
+      latitude: place.latitude,
+      longitude: place.longitude,
+    }));
+
+    if (!normalised) {
+      setLocationSuggestions([]);
+      setLocationSearchError(null);
+      setIsSearchingLocations(false);
+      return;
+    }
+
+    if (normalised.length < 3) {
+      setLocationSuggestions(localMatches);
+      setLocationSearchError(null);
+      setIsSearchingLocations(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingLocations(true);
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const matches = await searchLocations(normalised);
+        if (cancelled) return;
+        const allMatches = [...localMatches, ...matches];
+        const deduped = allMatches.filter(
+          (location, index, array) => array.findIndex((candidate) => candidate.display_name === location.display_name) === index
+        );
+        setLocationSuggestions(deduped);
+        setLocationSearchError(deduped.length === 0 ? "No matching address was found inside the Melbourne CBD." : null);
+      } catch {
+        if (cancelled) return;
+        setLocationSuggestions(localMatches);
+        setLocationSearchError(localMatches.length === 0 ? "Could not search for that address." : null);
+      } finally {
+        if (!cancelled) setIsSearchingLocations(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [locationSearchField, startLabel, destinationLabel]);
+
   async function loadNearbyTransit(selectedStart: Place, selectedDestination: Place) {
     const accessPointRequest = async (place: Place) => {
       const response = await fetch(
@@ -242,26 +299,6 @@ export default function HomePage() {
       throw new Error(`No matching ${field} was found inside the Melbourne CBD.`);
     }
     return placeFromSearchResult(selectedLocation);
-  }
-
-  async function searchAddress(field: SearchField) {
-    const query = field === "start" ? startLabel : destinationLabel;
-    setLocationSearchField(field);
-    setLocationSearchError(null);
-    setLocationSuggestions([]);
-    setIsSearchingLocations(true);
-
-    try {
-      const matches = await searchLocations(query);
-      setLocationSuggestions(matches);
-      if (matches.length === 0) {
-        setLocationSearchError("No matching address was found inside the Melbourne CBD.");
-      }
-    } catch (searchError) {
-      setLocationSearchError(searchError instanceof Error ? searchError.message : "Could not search for that address.");
-    } finally {
-      setIsSearchingLocations(false);
-    }
   }
 
   function selectAddress(field: SearchField, location: LocationSearchResult) {
@@ -308,6 +345,9 @@ export default function HomePage() {
     setIsLoading(true);
     setError(null);
     try {
+      if (!startLabel.trim() || !destinationLabel.trim()) {
+        throw new Error("Enter both From and To before finding routes.");
+      }
       const [selectedStart, selectedDestination] = await Promise.all([
         resolvePlace(startLabel, resolvedStart, "start"),
         resolvePlace(destinationLabel, resolvedDestination, "destination"),
@@ -408,11 +448,11 @@ export default function HomePage() {
             <div className="direction-fields">
               <div className="place-field">
                 <MapPinned size={18} aria-hidden="true" />
-                <label htmlFor="start-place">Start</label>
-                <input id="start-place" value={startLabel} autoComplete="off" onChange={(event) => { setStartLabel(event.target.value); setResolvedStart(null); setLocationSearchField(null); setLocationSuggestions([]); setLocationSearchError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void searchAddress("start"); } }} placeholder="Enter a CBD address or landmark" />
-                <button className="address-search-button" type="button" aria-label="Search start address" title="Search start address" onClick={() => void searchAddress("start")} disabled={isSearchingLocations}>
+                <label htmlFor="start-place">From</label>
+                <input id="start-place" value={startLabel} autoComplete="off" onFocus={() => { setLocationSearchField("start"); setLocationSearchError(null); }} onChange={(event) => { setStartLabel(event.target.value); setResolvedStart(null); setLocationSearchField("start"); setLocationSearchError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); const first = locationSuggestions[0]; if (locationSearchField === "start" && first) selectAddress("start", first); } }} placeholder="Enter From" />
+                <div className="address-search-button" aria-hidden="true">
                   {isSearchingLocations && locationSearchField === "start" ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}
-                </button>
+                </div>
               </div>
               {locationSearchField === "start" ? <div className="address-results" role="listbox" aria-label="Start address results">
                 {isSearchingLocations ? <p>Searching addresses...</p> : null}
@@ -421,11 +461,11 @@ export default function HomePage() {
               </div> : null}
               <div className="place-field">
                 <Search size={18} aria-hidden="true" />
-                <label htmlFor="destination-place">Destination</label>
-                <input id="destination-place" value={destinationLabel} autoComplete="off" onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); setLocationSearchField(null); setLocationSuggestions([]); setLocationSearchError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void searchAddress("destination"); } }} placeholder="Enter a CBD address or landmark" />
-                <button className="address-search-button" type="button" aria-label="Search destination address" title="Search destination address" onClick={() => void searchAddress("destination")} disabled={isSearchingLocations}>
+                <label htmlFor="destination-place">To</label>
+                <input id="destination-place" value={destinationLabel} autoComplete="off" onFocus={() => { setLocationSearchField("destination"); setLocationSearchError(null); }} onChange={(event) => { setDestinationLabel(event.target.value); setResolvedDestination(null); setLocationSearchField("destination"); setLocationSearchError(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); const first = locationSuggestions[0]; if (locationSearchField === "destination" && first) selectAddress("destination", first); } }} placeholder="Enter To" />
+                <div className="address-search-button" aria-hidden="true">
                   {isSearchingLocations && locationSearchField === "destination" ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}
-                </button>
+                </div>
               </div>
               {locationSearchField === "destination" ? <div className="address-results" role="listbox" aria-label="Destination address results">
                 {isSearchingLocations ? <p>Searching addresses...</p> : null}
@@ -448,7 +488,7 @@ export default function HomePage() {
               <div className="results-heading">
                 <div>
                   <span className="eyebrow">Route options</span>
-                  <h2>{result.recommended_route_id ? "Crowd preference applied" : "Walking routes"}</h2>
+                  <h2>Walking routes</h2>
                 </div>
                 <div className="result-actions">
                   {result.status === "available" ? <span className="status-chip available">Recent data</span> : null}
@@ -480,17 +520,20 @@ export default function HomePage() {
                       <strong>Route {route.route_id} - {routeLabel(route)}</strong>
                       <span>{formatDistance(route.distance_metres)} · {formatDuration(route.duration_seconds)}</span>
                     </span>
-                    <span className={`coverage-chip ${confidenceTone(route)}`}>{confidenceLabel(route)}</span>
-                    <button
-                      type="button"
-                      className="go-mark"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        selectRouteAndGo(route.route_id);
-                      }}
-                    >
-                      GO
-                    </button>
+                    <span className="route-option-actions">
+                      <span className={`coverage-chip ${confidenceTone(route)}`}>{confidenceLabel(route)}</span>
+                      {route.recommended ? <span className="recommended-mark"><Check size={14} />Recommended</span> : null}
+                      <button
+                        type="button"
+                        className="go-mark"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          selectRouteAndGo(route.route_id);
+                        }}
+                      >
+                        GO
+                      </button>
+                    </span>
                   </div>
                 ))}
               </div>

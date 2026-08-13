@@ -432,11 +432,7 @@ def routes(
     options: list[RouteOption] = []
     for route_id, provider_route in enumerate(provider_routes, start=1):
         crowd = score_coordinates(provider_route.coordinates, connection)
-        meets_threshold = (
-            crowd.status == "available"
-            and crowd.crowd_level is not None
-            and route_limit(crowd.crowd_level) <= route_limit(request.max_crowd_level)
-        )
+        has_current_crowd_score = crowd.status == "available" and crowd.crowd_level is not None
         options.append(
             RouteOption(
                 route_id=route_id,
@@ -450,7 +446,7 @@ def routes(
                 matched_sensor_count=crowd.matched_sensor_count,
                 latest_data_at=crowd.latest_data_at,
                 crowd_segments=crowd.crowd_segments,
-                meets_crowd_threshold=meets_threshold if crowd.status == "available" else None,
+                meets_crowd_threshold=has_current_crowd_score,
                 recommended=False,
                 warning=crowd.warning,
             )
@@ -478,11 +474,7 @@ def routes(
         )
 
     data_is_current = all(option.data_status == "available" for option in options)
-    warning = (
-        "No currently monitored route meets the selected crowd threshold."
-        if data_is_current
-        else "Walking routes are shown, but current crowd data is unavailable or outdated."
-    )
+    warning = "Walking routes are shown, but current crowd data is unavailable or outdated."
     return RoutesResponse(
         status="available" if data_is_current else "degraded",
         requested_max_crowd_level=request.max_crowd_level,
